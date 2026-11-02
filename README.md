@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/hero.jpg" alt="A Miyoo Mini Plus standing on a desk with headphones plugged in, playing music in MiniTape" width="100%"></p>
+<p align="center"><img src="docs/hero.jpg" alt="A grey Miyoo Mini Plus on a wooden stand on a desk, playing music in MiniTape, next to a mug and a keyboard" width="100%"></p>
 
 [![CI](https://github.com/zakijss/MiniTape/actions/workflows/ci.yml/badge.svg)](https://github.com/zakijss/MiniTape/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/zakijss/MiniTape)](https://github.com/zakijss/MiniTape/releases)
@@ -16,7 +16,7 @@ A music player for [Navidrome](https://www.navidrome.org) and other Subsonic ser
 - The audio path runs with real-time scheduling while music plays, so it keeps time with the Onion menu open.
 
 
-<p align="center"><img src="docs/desk.jpg" alt="MiniTape running on a Miyoo Mini Plus lying on a desk" width="100%"></p>
+<p align="center"><img src="docs/desk.jpg" alt="A smoked black Miyoo Mini Plus on a stand playing music in MiniTape, with headphones beside it" width="100%"></p>
 
 ## Using it
 
