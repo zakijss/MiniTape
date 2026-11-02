@@ -3,7 +3,7 @@ module github.com/zakijss/minitape
 go 1.27
 
 require (
-	github.com/zakijss/minideck v1.0.0
+	github.com/zakijss/minideck v1.0.1
 	golang.org/x/image v0.47.0
 )
 
