@@ -1,0 +1,38 @@
+name: Bug report
+description: Something doesn't work as the README says
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: MiniTape version
+      description: In App/<Folder>/version.txt on the card.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Onion OS version
+      description: MiniTape supports the Miyoo Mini Plus on Onion OS 4.4 only.
+      placeholder: "4.4.0"
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Server, if it's about one
+      description: Glances, Beszel, Vantage, Navidrome or a speed test server, and its version.
+  - type: textarea
+    attributes:
+      label: Logs or output
+      description: "The app's log: App/<Folder>/<app>.log, and for MiniScale also App/MiniScale/miniscale.log and /tmp/miniscale/log. Remove host names, addresses and tokens before pasting."
+      render: text

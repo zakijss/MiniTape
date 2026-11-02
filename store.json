@@ -1,0 +1,16 @@
+{
+  "name": "MiniTape",
+  "folder": "MiniTape",
+  "desc": "Music from Navidrome or any Subsonic server",
+  "repo": "zakijss/MiniTape",
+  "license": "MIT",
+  "version": "__VERSION__",
+  "zip": "https://github.com/zakijss/MiniTape/releases/download/v__VERSION__/minitape-__VERSION__.zip",
+  "sha256": "__SHA256__",
+  "size": __SIZE__,
+  "strip": "App/",
+  "released": "__RELEASED__",
+  "facts": [
+    "Keeps playing in the menu and other apps, and pauses for games."
+  ]
+}

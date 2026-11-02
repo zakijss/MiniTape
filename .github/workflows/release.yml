@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Build for the device, stamped with the tag's version
+        run: VERSION="${GITHUB_REF_NAME#v}" ./scripts/build.sh
+      - name: Package (zip, app.json, SHA256SUMS)
+        run: ./scripts/package.sh "${GITHUB_REF_NAME#v}"
+      - name: Release notes from the changelog
+        id: version
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          awk -v v="$v" '$0 ~ "^## \\[" v "\\]" {f=1; next} /^## \[/ || /^\[[^]]*\]: / {f=0} f' CHANGELOG.md > notes.md
+          printf '\nSHA-256:\n\n```\n%s\n```\n' "$(cat dist/SHA256SUMS)" >> notes.md
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3.0.3
+        with:
+          name: MiniTape ${{ steps.version.outputs.version }}
+          body_path: notes.md
+          files: |
+            dist/*.zip
+            dist/app.json
+            dist/SHA256SUMS

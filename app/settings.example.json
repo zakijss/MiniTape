@@ -1,0 +1,7 @@
+{
+  "url": "http://homeserver:4533",
+  "user": "yourname",
+  "secret": "navidrome",
+  "format": "mp3",
+  "max_bitrate": 192
+}
