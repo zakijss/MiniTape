@@ -443,7 +443,7 @@ func decodeCover(b []byte, size int) (*image.RGBA, error) {
 	if err != nil {
 		return nil, err
 	}
-	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width*cfg.Height > maxCoverPixels {
+	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > maxCoverPixels { // int64: int is 32-bit on the device
 		return nil, fmt.Errorf("cover too large (%dx%d)", cfg.Width, cfg.Height)
 	}
 	decodeMu.Lock()

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -135,5 +136,14 @@ func TestCoverSizes(t *testing.T) {
 	png.Encode(&buf, huge)
 	if _, err := decodeCover(buf.Bytes(), largePx); err == nil {
 		t.Error("huge cover decoded")
+	}
+}
+
+// A 65535x65535 JPEG header must be refused: on the device's 32-bit int
+// the pixel count wraps negative and would pass a plain int check.
+func TestDecodeCoverOverflow(t *testing.T) {
+	sof := "\xff\xd8\xff\xc0\x00\x0b\x08\xff\xff\xff\xff\x01\x01\x11\x00\xff\xda\x00\x08" // SOI, grey SOF0, SOS
+	if _, err := decodeCover([]byte(sof), largePx); err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Errorf("65535x65535 cover: %v", err)
 	}
 }

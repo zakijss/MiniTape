@@ -6,6 +6,12 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-11-03
+
+### Fixed
+
+- A server sending a cover image with a huge declared size (for example 65535x65535 JPEG) could get past the size check on the device and run it out of memory; such covers are now refused.
+
 ## [1.0.1] - 2026-11-02
 
 ### Fixed
@@ -18,6 +24,7 @@ All notable changes are listed here. The format follows
 
 - The first release: browsing, background playback with an on-screen ticker, lyrics, pixel-art covers, Last.fm and ListenBrainz scrobbling, songs downloaded ahead to the card with bit rate steps, and real-time audio scheduling. Settings for the streaming quality, the room for downloaded songs (and clearing them), the menu ticker, background playback and cover art.
 
-[Unreleased]: https://github.com/zakijss/MiniTape/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/zakijss/MiniTape/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/zakijss/MiniTape/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/zakijss/MiniTape/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/zakijss/MiniTape/releases/tag/v1.0.0
