@@ -103,7 +103,7 @@ func (p *Player) startLocked(at time.Duration) {
 	cmd := ffplayCommand(p.ffplay, "-nodisp", "-autoexit", "-loglevel", "quiet", p.url(p.queue[p.pos], sec))
 	cmd.Env = ffplayEnv()
 	if err := cmd.Start(); err != nil {
-		p.err = "can't start ffplay: " + err.Error()
+		p.err = "Can't start ffplay: " + err.Error()
 		return
 	}
 	// ffplay runs with real-time scheduling (see realtime.go); without

@@ -23,7 +23,7 @@ func setup(scr *ui.Screen, input <-chan ui.Event, dir string, cfg *Settings, sec
 		pass.Placeholder = "(saved)"
 	}
 	intro := ""
-	title := "MiniTape settings"
+	title := "Music server"
 	if first {
 		title = "Set up MiniTape"
 		intro = "Connect to your music server: Navidrome, Subsonic, Airsonic, Gonic or any other Subsonic-compatible one."

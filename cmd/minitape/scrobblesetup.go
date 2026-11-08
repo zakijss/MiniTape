@@ -453,7 +453,7 @@ func (u *scrobbleUI) checkLB(tok string) (user string, ok bool) {
 		u.scr.Notice(u.input, "ListenBrainz said no", "It doesn't know that token. Copy your user token from listenbrainz.org/settings again.")
 		return "", false
 	default:
-		return "", u.scr.Confirm(u.input, "Couldn't check the token", err.Error(), "Keep it")
+		return "", u.scr.Confirm(u.input, "Couldn't check the token", err.Error()+"\nKeep the token anyway?", "Keep it")
 	}
 }
 

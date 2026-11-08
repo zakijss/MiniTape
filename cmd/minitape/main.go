@@ -803,7 +803,7 @@ func (a *app) shuffleAll() {
 			case err != nil:
 				v.err = err.Error()
 			case len(s) == 0:
-				v.err = "No songs."
+				v.err = "Your server has no songs yet. Add some music to it."
 			default:
 				v.toNP = true // draw pops this view
 			}
