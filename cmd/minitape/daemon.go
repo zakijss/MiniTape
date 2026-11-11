@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -153,6 +154,11 @@ func runDaemon(dir string) {
 	mux.HandleFunc("/next", func(w http.ResponseWriter, r *http.Request) { pl.Next() })
 	mux.HandleFunc("/prev", func(w http.ResponseWriter, r *http.Request) { pl.Prev() })
 	mux.HandleFunc("/stop", func(w http.ResponseWriter, r *http.Request) { pl.Stop() })
+	// /seek?d=-10: seconds back (negative) or forward
+	mux.HandleFunc("/seek", func(w http.ResponseWriter, r *http.Request) {
+		d, _ := strconv.Atoi(r.URL.Query().Get("d"))
+		pl.Seek(d)
+	})
 	mux.HandleFunc("/reload", func(w http.ResponseWriter, r *http.Request) {
 		// settings changed: pick up the new server and login
 		lg.reload(func() {
@@ -445,10 +451,11 @@ func (r *remote) Play(q []Song, i int) {
 		Index int
 	}{q, i})
 }
-func (r *remote) Toggle() { r.post("/toggle", nil) }
-func (r *remote) Next()   { r.post("/next", nil) }
-func (r *remote) Prev()   { r.post("/prev", nil) }
-func (r *remote) Stop()   { r.post("/stop", nil) }
+func (r *remote) Toggle()    { r.post("/toggle", nil) }
+func (r *remote) Next()      { r.post("/next", nil) }
+func (r *remote) Prev()      { r.post("/prev", nil) }
+func (r *remote) Stop()      { r.post("/stop", nil) }
+func (r *remote) Seek(d int) { r.post("/seek?d="+strconv.Itoa(d), nil) }
 
 // Quit stops the music and the background player. A player that isn't
 // running is left that way.

@@ -189,6 +189,26 @@ func (p *Player) Prev() {
 	p.startLocked(0)
 }
 
+// Seek moves d seconds forward or back in the track, starting the stream
+// again from there; past the end it goes to the next track. A paused track
+// plays on from the new place.
+func (p *Player) Seek(d int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.suspended || p.pos < 0 || p.pos >= len(p.queue) {
+		return
+	}
+	at := max(0, p.elapsedLocked()+time.Duration(d)*time.Second)
+	if dur := p.queue[p.pos].Duration; dur > 0 && at >= time.Duration(dur)*time.Second {
+		if p.pos+1 < len(p.queue) {
+			p.pos++
+			p.startLocked(0)
+		}
+		return
+	}
+	p.startLocked(at)
+}
+
 // Stop ends playback and empties the queue.
 func (p *Player) Stop() {
 	p.mu.Lock()

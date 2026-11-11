@@ -152,6 +152,7 @@ type playerCtl interface {
 	Next()
 	Prev()
 	Stop()
+	Seek(d int) // d seconds forward, or back when negative
 	State() NowPlaying
 }
 
@@ -165,6 +166,8 @@ type view struct {
 	open    func(it *ui.Item) // A on an item
 	play    func()            // START: play everything shown
 	toNP    bool              // set by a loader: replace this view with Now Playing
+	refresh func()            // Y: load the list again from the server
+	shuffle func()            // X: play the songs shown in a random order
 
 	// Album and playlist pages show the cover and details on the left, and
 	// a short kind ("Album") in the header instead of repeating the name.
@@ -177,6 +180,7 @@ type view struct {
 
 type app struct {
 	scr    *ui.Screen
+	input  <-chan ui.Event
 	sub    *Subsonic
 	player playerCtl
 	stack  []*view
@@ -210,6 +214,45 @@ type app struct {
 	lyrScroll int // first line shown, for lyrics without times
 	lyrShown  int // the line highlighted in the last draw
 	lyrTick   int
+
+	// stars set from Now Playing this session, by song id: the queue the
+	// player holds still has the song as it was listed.
+	starMu sync.Mutex
+	stars  map[string]bool
+}
+
+// isStarred reports whether s is starred, counting R2 presses on Now Playing.
+func (a *app) isStarred(s Song) bool {
+	a.starMu.Lock()
+	defer a.starMu.Unlock()
+	if on, ok := a.stars[s.ID]; ok {
+		return on
+	}
+	return s.Starred != ""
+}
+
+// toggleStar stars or unstars s on the server, showing the new state at
+// once and going back to the old one if the server says no.
+func (a *app) toggleStar(s Song) {
+	if s.ID == "" {
+		return
+	}
+	on := !a.isStarred(s)
+	a.starMu.Lock()
+	if a.stars == nil {
+		a.stars = map[string]bool{}
+	}
+	a.stars[s.ID] = on
+	a.starMu.Unlock()
+	go func() {
+		if err := a.sub.Star(s.ID, on); err != nil {
+			log.Printf("star %s: %v", s.ID, err)
+			a.starMu.Lock()
+			a.stars[s.ID] = !on
+			a.starMu.Unlock()
+		}
+		a.poke()
+	}()
 }
 
 type songLyrics struct {
@@ -259,7 +302,7 @@ func main() {
 	}
 
 	redraw := make(chan struct{}, 1)
-	a := &app{scr: scr, covers: map[coverKey]image.Image{}, pending: map[coverKey]bool{}, failed: map[coverKey]time.Time{},
+	a := &app{scr: scr, input: input, covers: map[coverKey]image.Image{}, pending: map[coverKey]bool{}, failed: map[coverKey]time.Time{},
 		backdrops: map[string]*image.RGBA{}, fetchSem: make(chan struct{}, 3),
 		cfg: &cfg, lyr: map[string]*songLyrics{}, done: make(chan func(), 8)}
 	a.poke = func() {
@@ -545,23 +588,36 @@ func (a *app) push(v *view) { a.stack = append(a.stack, v) }
 
 // load runs fn in the background with v showing a loading state. fn
 // returns the list's items and, if set, fill: what else of v the result
-// changes. Both are applied to v by the event loop (see app.done).
+// changes. Both are applied to v by the event loop (see app.done). It also
+// sets v.refresh, which runs fn again past the copy on the card.
 func (a *app) load(v *view, fn func() (items []ui.Item, fill func(), err error)) *view {
-	v.loading = true
-	go func() {
-		items, fill, err := fn()
-		a.done <- func() {
-			if fill != nil {
-				fill()
+	run := func(fresh bool) {
+		v.loading, v.err = true, ""
+		go func() {
+			if fresh {
+				a.sub.fresh.Add(1)
 			}
-			v.list.Items, v.loading = items, false
-			if err != nil {
-				v.err = err.Error()
-			} else if len(items) == 0 {
-				v.err = "Nothing here yet."
+			items, fill, err := fn()
+			if fresh {
+				a.sub.fresh.Add(-1)
 			}
-		}
-	}()
+			a.done <- func() {
+				if fill != nil {
+					fill()
+				}
+				v.list.Items, v.loading = items, false
+				// a refresh keeps the place in the list
+				v.list.Sel = max(0, min(v.list.Sel, len(items)-1))
+				if err != nil {
+					v.err = err.Error()
+				} else if len(items) == 0 {
+					v.err = "Nothing here yet."
+				}
+			}
+		}()
+	}
+	v.refresh = func() { run(true) }
+	run(false)
 	return v
 }
 
@@ -576,6 +632,7 @@ func (a *app) home() *view {
 		{Label: "Most played", Sub: "Your favourites", Icon: "chart", Chevron: true, Value: albums("Most played", "frequent")},
 		{Label: "Recently played", Sub: "Pick up where you left off", Icon: "clock", Chevron: true, Value: albums("Recently played", "recent")},
 		{Label: "Starred", Sub: "Albums and songs you starred", Icon: "star", Chevron: true, Value: func() { a.push(a.starred()) }},
+		{Label: "Search", Icon: "eye", Chevron: true, Sub: "Artists, albums and songs", Value: func() { a.search("") }},
 		{Label: "Artists", Icon: "person", Chevron: true, Sub: "Everyone, A to Z", Value: func() { a.push(a.artists()) }},
 		{Label: "Playlists", Icon: "list", Chevron: true, Sub: "Your playlists", Value: func() { a.push(a.playlists()) }},
 		{Label: "Settings", Icon: "gear", Sub: "Server, scrobbling and appearance", Chevron: true, Value: func() { a.settings() }},
@@ -672,29 +729,87 @@ func (a *app) starred() *view {
 	}
 	return a.load(v, func() ([]ui.Item, func(), error) {
 		al, s, err := a.sub.Starred()
-		items := a.albumItems(al)
-		for i, x := range s {
-			id := x.CoverArt
-			items = append(items, ui.Item{Label: x.Title, Sub: x.Artist, Value: i, Image: func() image.Image { return a.shown(a.thumb(id), a.listThumb) }})
-		}
+		items := append(a.albumItems(al), a.songItems(s)...)
 		return items, func() { v.songs = s }, err
 	})
 }
 
+// openArtist shows an artist's albums.
+func (a *app) openArtist(ar Artist) {
+	av := &view{title: ar.Name, open: a.openAlbum}
+	av.play = func() {
+		if it := av.list.Selected(); it != nil {
+			a.playAlbum(it.Value.(Album))
+		}
+	}
+	a.push(a.load(av, func() ([]ui.Item, func(), error) {
+		full, err := a.sub.Artist(ar.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		sub := fmt.Sprintf("%d albums", len(full.Album))
+		return a.albumItems(full.Album), func() { av.sub = sub }, nil
+	}))
+}
+
+// search asks for words with the keyboard and lists the artists, albums
+// and songs that match. A song plays from the found songs onwards.
+func (a *app) search(initial string) {
+	q, ok := a.scr.Prompt(a.input, "Search", initial, "An artist, album or song", false)
+	if !ok || strings.TrimSpace(q) == "" {
+		return
+	}
+	v := &view{title: "Search", sub: q}
+	v.open = func(it *ui.Item) {
+		switch x := it.Value.(type) {
+		case Artist:
+			a.openArtist(x)
+		case Album:
+			a.openAlbum(it)
+		case int:
+			a.player.Play(v.songs, x)
+			a.np = true
+		}
+	}
+	v.play = func() {
+		if it := v.list.Selected(); it != nil {
+			if al, ok := it.Value.(Album); ok {
+				a.playAlbum(al)
+			} else {
+				v.open(it)
+			}
+		}
+	}
+	a.push(a.load(v, func() ([]ui.Item, func(), error) {
+		ars, als, songs, err := a.sub.SearchAll(q, 20)
+		var items []ui.Item
+		for _, x := range ars {
+			items = append(items, ui.Item{Label: x.Name, Sub: "Artist", Icon: "person", Tint: ui.Muted, Chevron: true, Value: x})
+		}
+		items = append(items, a.albumItems(als)...)
+		items = append(items, a.songItems(songs)...)
+		if err == nil && len(items) == 0 {
+			err = screenError("Nothing matches \u201c" + q + "\u201d.")
+		}
+		return items, func() { v.songs = songs }, err
+	}))
+}
+
+// songItems are rows for songs from many albums, each with its cover; the
+// Value is the song's index.
+func (a *app) songItems(songs []Song) []ui.Item {
+	items := make([]ui.Item, len(songs))
+	for i, x := range songs {
+		id := x.CoverArt
+		items[i] = ui.Item{Label: x.Title, Sub: x.Artist, Detail: fmtDur(x.Duration), Value: i,
+			Image: func() image.Image { return a.shown(a.thumb(id), a.listThumb) }}
+	}
+	return items
+}
+
 func (a *app) artists() *view {
 	v := &view{title: "Artists"}
-	v.open = func(it *ui.Item) {
-		ar := it.Value.(Artist)
-		av := &view{title: ar.Name, open: a.openAlbum}
-		a.push(a.load(av, func() ([]ui.Item, func(), error) {
-			full, err := a.sub.Artist(ar.ID)
-			if err != nil {
-				return nil, nil, err
-			}
-			sub := fmt.Sprintf("%d albums", len(full.Album))
-			return a.albumItems(full.Album), func() { av.sub = sub }, nil
-		}))
-	}
+	v.open = func(it *ui.Item) { a.openArtist(it.Value.(Artist)) }
 	return a.load(v, func() ([]ui.Item, func(), error) {
 		ars, err := a.sub.Artists()
 		sub := fmt.Sprintf("%d artists", len(ars))
@@ -762,6 +877,15 @@ func (a *app) songList(title string, numbered bool, fetch func() ([]Song, error)
 			v.open(it)
 		}
 	}
+	v.shuffle = func() {
+		if len(v.songs) == 0 {
+			return
+		}
+		q := append([]Song(nil), v.songs...)
+		rand.Shuffle(len(q), func(i, j int) { q[i], q[j] = q[j], q[i] })
+		a.player.Play(q, 0)
+		a.np = true
+	}
 	return a.load(v, func() ([]ui.Item, func(), error) {
 		s, err := fetch()
 		items := make([]ui.Item, len(s))
@@ -776,6 +900,9 @@ func (a *app) songList(title string, numbered bool, fetch func() ([]Song, error)
 		// them when the result is applied, not here.
 		fill := func() {
 			v.songs = s
+			// info[0] is the caller's (the artist); a refresh replaces the
+			// songs line instead of adding a second one
+			v.info = v.info[:min(len(v.info), 1)]
 			if len(s) > 0 {
 				line := fmt.Sprintf("%d songs · %s", len(s), totalDur(s))
 				if v.year > 0 {
@@ -826,10 +953,16 @@ func (a *app) handle(ev ui.Event) {
 			a.lyrScroll += 3
 		case ui.A, ui.Start:
 			a.player.Toggle()
-		case ui.L1, ui.Left:
+		case ui.L1:
 			a.player.Prev()
-		case ui.R1, ui.Right:
+		case ui.R1:
 			a.player.Next()
+		case ui.Left:
+			a.player.Seek(-seekStep)
+		case ui.Right:
+			a.player.Seek(seekStep)
+		case ui.R2:
+			a.toggleStar(a.player.State().Song)
 		case ui.B, ui.Select:
 			a.np = false
 		case ui.X:
@@ -858,10 +991,26 @@ func (a *app) handle(ev ui.Event) {
 		if a.player.State().Has {
 			a.np = true
 		}
+	case ui.Y:
+		if v.refresh != nil && !v.loading {
+			v.refresh()
+		}
+	case ui.X:
+		if v.shuffle != nil && !v.loading {
+			v.shuffle()
+		}
+	case ui.L2: // to the top and the bottom of a long list
+		v.list.Sel = 0
+	case ui.R2:
+		v.list.Sel = max(0, len(v.list.Items)-1)
 	default:
 		v.list.Handle(ev)
 	}
 }
+
+// seekStep is how far Left and Right move in a song on Now Playing, in
+// seconds.
+const seekStep = 10
 
 // Covers come in two sizes, each fetched from the server at that size:
 // thumbnails for list rows (44-54 px) and the mini player, and the large
@@ -1048,8 +1197,18 @@ func (a *app) draw() {
 	} else if v.play != nil {
 		hints = append(hints, ui.Hint{Button: "START", Label: "Play"})
 	}
+	if v.shuffle != nil && len(v.songs) > 1 {
+		hints = append(hints, ui.Hint{Button: "X", Label: "Shuffle"})
+	}
+	if v.refresh != nil {
+		hints = append(hints, ui.Hint{Button: "Y", Label: "Refresh"})
+	}
 	if st.Has {
-		hints = append(hints, ui.Hint{Button: "SELECT", Label: "Now playing"})
+		np := "Now playing"
+		if len(hints) > 2 { // a full footer would cut it short
+			np = "Player"
+		}
+		hints = append(hints, ui.Hint{Button: "SELECT", Label: np})
 	}
 	if len(a.stack) > 1 {
 		hints = append(hints, ui.Hint{Button: "B", Label: "Back"})
@@ -1206,8 +1365,18 @@ func (a *app) drawNowPlaying() {
 		return
 	}
 	s.Text(24, 18, "NOW PLAYING", ui.Caps, ui.Muted)
+	hx := 24 + ui.Measure(ui.Caps, "NOW PLAYING") + 12
 	if st.Len > 0 {
-		s.Text(24+ui.Measure(ui.Caps, "NOW PLAYING")+12, 18, fmt.Sprintf("%d OF %d", st.Pos+1, st.Len), ui.Caps, ui.Faint)
+		pos := fmt.Sprintf("%d OF %d", st.Pos+1, st.Len)
+		s.Text(hx, 18, pos, ui.Caps, ui.Faint)
+		hx += ui.Measure(ui.Caps, pos) + 12
+	}
+	// R2 stars the song: the star, or how to give it one (the footer is
+	// full)
+	if st.Has && a.isStarred(st.Song) {
+		s.Icon("star", hx, 12, 22, ui.Text)
+	} else if st.Has {
+		s.Text(hx, 18, "R2 TO STAR", ui.Caps, ui.Faint)
 	}
 	if !st.Has {
 		s.Message("Nothing playing", "Pick an album or a playlist.", ui.Hint{Button: "B", Label: "Back"})

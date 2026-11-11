@@ -23,6 +23,7 @@ func (p *stillPlayer) Toggle()              {}
 func (p *stillPlayer) Next()                {}
 func (p *stillPlayer) Prev()                {}
 func (p *stillPlayer) Stop()                {}
+func (p *stillPlayer) Seek(d int)           {}
 func (p *stillPlayer) State() NowPlaying    { return p.st }
 
 // testCover is a 1000x1000 JPEG with fine detail (thin rings, stripes and
@@ -111,13 +112,13 @@ func TestScreens(t *testing.T) {
 			items[i] = ui.Item{Label: trackLabel(x.Track, x.Title), Detail: fmtDur(x.Duration), Value: i}
 		}
 		a.stack = []*view{{title: "Night Signals", kind: "Album", art: "al1", info: []string{"The Static Gardens"},
-			year: 2007, songs: songs, list: ui.List{Items: items}}}
+			year: 2007, songs: songs, list: ui.List{Items: items}, refresh: func() {}, shuffle: func() {}}}
 		a.draw()
 
 		open("minitape-albums" + suffix)
 		al := []Album{{ID: "al1", Name: "Night Signals", Artist: "The Static Gardens", Year: 2007, CoverArt: "al1"},
 			{ID: "al2", Name: "Low Orbit", Artist: "Paper Satellites", Year: 2001, CoverArt: "al1"}}
-		a.stack = []*view{{title: "Recently added", list: ui.List{Items: a.albumItems(al)}}}
+		a.stack = []*view{{title: "Recently added", list: ui.List{Items: a.albumItems(al)}, play: func() {}, refresh: func() {}}}
 		a.draw()
 	}
 	a.cfg.CoverStyle = ""

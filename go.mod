@@ -4,11 +4,11 @@ go 1.27
 
 require (
 	github.com/zakijss/minideck v1.0.3
-	golang.org/x/image v0.47.0
+	golang.org/x/image v0.48.0
 )
 
 require (
-	golang.org/x/crypto/x509roots/fallback v0.0.0-20261020153306-9f2b28d4331a // indirect
-	golang.org/x/sys v0.49.0 // indirect
-	golang.org/x/text v0.43.0 // indirect
+	golang.org/x/crypto/x509roots/fallback v0.0.0-20261111203624-6bec4215b57b // indirect
+	golang.org/x/sys v0.50.0 // indirect
+	golang.org/x/text v0.44.0 // indirect
 )

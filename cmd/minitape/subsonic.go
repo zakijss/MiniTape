@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zakijss/minideck/cache"
@@ -43,6 +44,11 @@ type Subsonic struct {
 	// the background: the player daemon swaps the login on /reload while
 	// streams and scrobbles are in flight.
 	loginMu sync.RWMutex
+	// fresh, while above 0, sends cacheable requests to the server instead
+	// of answering from the card (a refresh); the replies are still kept.
+	// shortcut: it applies to every request in flight, not just the
+	// refresh's, which only costs a few extra fetches.
+	fresh atomic.Int32
 }
 
 // SetLogin changes the server and login (after Settings).
@@ -84,6 +90,7 @@ type Song struct {
 	SamplingRate int    `json:"samplingRate,omitempty"` // Hz (OpenSubsonic)
 	Year         int    `json:"year,omitempty"`
 	Genre        string `json:"genre,omitempty"`
+	Starred      string `json:"starred,omitempty"` // when it was starred; empty if not
 }
 
 // Album is an album; Song is filled in only by Subsonic.Album.
@@ -138,7 +145,9 @@ type response struct {
 			Song []Song `json:"song"`
 		} `json:"randomSongs"`
 		SearchResult3 *struct {
-			Song []Song `json:"song"`
+			Artist []Artist `json:"artist"`
+			Album  []Album  `json:"album"`
+			Song   []Song   `json:"song"`
 		} `json:"searchResult3"`
 		Lyrics *struct {
 			Value string `json:"value"`
@@ -190,7 +199,7 @@ func (c *Subsonic) URL(endpoint string, extra url.Values) string {
 
 func (c *Subsonic) call(endpoint string, extra url.Values) (*response, error) {
 	useCache := c.Cache != nil && cacheable[endpoint] && !(endpoint == "getAlbumList2" && extra.Get("type") == "random")
-	if useCache {
+	if useCache && c.fresh.Load() == 0 {
 		key := c.cacheKey(endpoint, extra)
 		if b, ok := c.Cache.Get(key); ok {
 			var r response
@@ -365,6 +374,27 @@ func (c *Subsonic) Search(q string, n int) ([]Song, error) {
 		return nil, err
 	}
 	return r.R.SearchResult3.Song, nil
+}
+
+// SearchAll finds artists, albums and songs matching q, up to n of each.
+func (c *Subsonic) SearchAll(q string, n int) ([]Artist, []Album, []Song, error) {
+	k := fmt.Sprint(n)
+	r, err := c.call("search3", url.Values{"query": {q}, "songCount": {k}, "albumCount": {k}, "artistCount": {k}})
+	if err != nil || r.R.SearchResult3 == nil {
+		return nil, nil, nil, err
+	}
+	x := r.R.SearchResult3
+	return x.Artist, x.Album, x.Song, nil
+}
+
+// Star stars a song (on) or takes its star away.
+func (c *Subsonic) Star(id string, on bool) error {
+	endpoint := "unstar"
+	if on {
+		endpoint = "star"
+	}
+	_, err := c.call(endpoint, url.Values{"id": {id}})
+	return err
 }
 
 // Starred returns the starred albums and songs.

@@ -6,6 +6,20 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Y refreshes a list from the server; lists still open at once from the copy on the card.
+- Search, on the first screen: artists, albums and songs.
+- X shuffles an album or playlist.
+- Left and Right go back or forward 10 seconds in a song.
+- R2 on Now Playing stars or unstars the song.
+- L2 and R2 jump to the top and the bottom of a list.
+- START plays an album from an artist's page.
+
+### Changed
+
+- Dependencies updated: golang.org/x/image 0.48.0, x/sys 0.50.0, x/text 0.44.0, newer root certificates; Go 1.27.4.
+
 ## [1.0.3] - 2026-11-08
 
 ### Changed

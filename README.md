@@ -8,7 +8,7 @@
 
 A music player for [Navidrome](https://www.navidrome.org) and other Subsonic servers, on a Miyoo Mini Plus. The music keeps playing in the Onion menu and in other apps, and pauses for games. Part of [MiniDeck](https://github.com/zakijss/MiniDeck).
 
-- Recently added, random, most played and starred albums, artists, playlists, and **Shuffle everything** in one press.
+- Recently added, random, most played and starred albums, artists, playlists, search, and **Shuffle everything** in one press.
 - Plays in the background, with the song scrolling across the top of the screen; **Settings > Background playback** turns that off.
 - Synced lyrics, covers drawn in the interface's pixel style, and scrobbling to Last.fm and ListenBrainz.
 - Songs download to the card ahead of the music, the next one while the last plays, so they start at once and Wi-Fi drops aren't heard; the bit rate steps down when the link can't keep up. Up to 500 MB of songs (by default) stay on the card and play again offline.
@@ -20,7 +20,9 @@ A music player for [Navidrome](https://www.navidrome.org) and other Subsonic ser
 
 ## Using it
 
-The first start asks for your server, user name and password. On the now-playing screen **A** pauses, **L1**/**R1** skip, **Y** shows the lyrics, **X** stops and **B** goes back. **SELECT** opens the now-playing screen from anywhere in the app.
+The first start asks for your server, user name and password. On the now-playing screen **A** pauses, **L1**/**R1** skip, **Left**/**Right** go back or forward 10 seconds, **R2** stars or unstars the song, **Y** shows the lyrics, **X** stops and **B** goes back. **SELECT** opens the now-playing screen from anywhere in the app.
+
+In the lists, **Y** refreshes from the server (lists open at once from the copy on the card), **X** shuffles an album or playlist, and **L2**/**R2** jump to the top and the bottom. **Search** on the first screen finds artists, albums and songs.
 
 MiniTape asks the server for MP3 (192 kbit/s by default; **Settings > Streaming quality**, or `format` and `max_bitrate` in `App/MiniTape/settings.json`), since the device's FFmpeg is old, so Navidrome needs ffmpeg for transcoding. Servers on your tailnet work through [MiniScale](https://github.com/zakijss/MiniScale).
 

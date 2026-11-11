@@ -1,7 +1,7 @@
 # Go runs in Docker unless you have Go 1.27 or newer and pass GO=go
 # (`make test GO=go`).
 
-GO_IMAGE ?= golang:1.27.3-bookworm
+GO_IMAGE ?= golang:1.27.4-bookworm
 DOCKER   ?= docker run --rm -v "$(CURDIR)":/src -w /src \
 	-v minideck-gocache:/root/.cache -v minideck-gomod:/go/pkg/mod
 GO       ?= $(DOCKER) $(GO_IMAGE) go
