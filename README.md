@@ -26,7 +26,7 @@ The sleep timer pauses the music after 15 minutes to 90 minutes, or at the end o
 
 In the lists, **Y** refreshes from the server (lists open at once from the copy on the card), **X** shuffles an album or playlist, and **L2**/**R2** jump to the top and the bottom. **Search** on the first screen finds artists, albums and songs.
 
-MiniTape asks the server for MP3 (192 kbit/s by default; **Settings > Streaming quality**, or `format` and `max_bitrate` in `App/MiniTape/settings.json`), since the device's FFmpeg is old, so Navidrome needs ffmpeg for transcoding. Servers on your tailnet work through [MiniScale](https://github.com/zakijss/MiniScale).
+MiniTape asks the server for MP3 (192 kbit/s by default; **Settings > Streaming quality**, or `format` and `max_bitrate` in `App/MiniTape/settings.json`), since the device's FFmpeg is old, so Navidrome needs ffmpeg for transcoding. Servers on your private network (Tailscale, Headscale, WireGuard or NetBird) work through [MiniScale](https://github.com/zakijss/MiniScale).
 
 ## Install
 
