@@ -28,6 +28,9 @@ type Player struct {
 	gen       int           // bumps on every track change, to ignore stale exits
 	err       string
 	idleSince time.Time
+	// endOfSong, set by the sleep timer, stops at the end of this track
+	// instead of going on to the next.
+	endOfSong bool
 
 	// url gives the stream URL for a song, starting at a whole second.
 	url     func(s Song, at int) string
@@ -126,13 +129,9 @@ func (p *Player) startLocked(at time.Duration) {
 				p.err = "Playback failed (server, network or format)."
 				p.cmd = nil
 				p.idleSince = time.Now()
-			} else if p.pos+1 < len(p.queue) {
-				p.pos++
-				p.startLocked(0)
 			} else {
 				p.cmd = nil
-				p.offset = 0
-				p.idleSince = time.Now()
+				p.songEndedLocked()
 			}
 		}
 		p.mu.Unlock()
@@ -140,6 +139,25 @@ func (p *Player) startLocked(at time.Duration) {
 			p.changed()
 		}
 	}()
+}
+
+// songEndedLocked goes on after a track has finished (ffplay has
+// exited): to the next one, or nowhere at the end of the queue or when the
+// sleep timer stops after this song (A later plays the next one).
+func (p *Player) songEndedLocked() {
+	switch {
+	case p.endOfSong:
+		p.endOfSong = false
+		if p.pos+1 < len(p.queue) {
+			p.pos++
+		}
+	case p.pos+1 < len(p.queue):
+		p.pos++
+		p.startLocked(0)
+		return
+	}
+	p.offset = 0
+	p.idleSince = time.Now()
 }
 
 // Toggle pauses or continues, or starts the current track again if it
@@ -200,20 +218,35 @@ func (p *Player) Seek(d int) {
 	}
 	at := max(0, p.elapsedLocked()+time.Duration(d)*time.Second)
 	if dur := p.queue[p.pos].Duration; dur > 0 && at >= time.Duration(dur)*time.Second {
-		if p.pos+1 < len(p.queue) {
-			p.pos++
-			p.startLocked(0)
-		}
+		p.stopLocked()
+		p.songEndedLocked()
 		return
 	}
 	p.startLocked(at)
+}
+
+// StopAfterSong sets (or clears) stopping at the end of the current track.
+func (p *Player) StopAfterSong(on bool) {
+	p.mu.Lock()
+	p.endOfSong = on
+	p.mu.Unlock()
+}
+
+// Pause pauses, if playing.
+func (p *Player) Pause() {
+	p.mu.Lock()
+	playing := p.cmd != nil && !p.paused && !p.suspended
+	p.mu.Unlock()
+	if playing {
+		p.Toggle()
+	}
 }
 
 // Stop ends playback and empties the queue.
 func (p *Player) Stop() {
 	p.mu.Lock()
 	p.stopLocked()
-	p.queue, p.pos, p.offset, p.suspended = nil, 0, 0, false
+	p.queue, p.pos, p.offset, p.suspended, p.endOfSong = nil, 0, 0, false, false
 	p.mu.Unlock()
 }
 
@@ -272,6 +305,10 @@ type NowPlaying struct {
 	// Kbps is the bit rate the song is streamed at (the setting, or lower
 	// on a slow link), 0 when not known.
 	Kbps int `json:"kbps,omitempty"`
+	// the sleep timer: seconds until the music pauses, or SleepEnd to stop
+	// at the end of this song
+	SleepLeft int  `json:"sleepLeft,omitempty"`
+	SleepEnd  bool `json:"sleepEnd,omitempty"`
 }
 
 // State returns the player's state, with up to three songs coming next.
@@ -279,7 +316,7 @@ func (p *Player) State() NowPlaying {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	n := NowPlaying{Pos: p.pos, Len: len(p.queue), Err: p.err, Paused: p.paused,
-		Playing: p.cmd != nil, Suspended: p.suspended}
+		Playing: p.cmd != nil, Suspended: p.suspended, SleepEnd: p.endOfSong}
 	if p.pos >= 0 && p.pos < len(p.queue) {
 		n.Song, n.Has = p.queue[p.pos], true
 		if p.pos+1 < len(p.queue) {

@@ -83,3 +83,53 @@ func TestPlayerSeek(t *testing.T) {
 		t.Fatalf("playing %s after seeking past the end", st.Song.ID)
 	}
 }
+
+// The sleep timer's "end of this song" stops there and keeps the place:
+// the next song is ready to play, not playing.
+func TestPlayerStopsAfterSong(t *testing.T) {
+	ff := filepath.Join(t.TempDir(), "ffplay")
+	os.WriteFile(ff, []byte("#!/bin/sh\nexec sleep 0.2\n"), 0o755)
+	t.Setenv("MINIDECK_FFPLAY", ff)
+	old := chrtPath // real-time scheduling needs privileges a test lacks
+	chrtPath = ""
+	defer func() { chrtPath = old }()
+	p := NewPlayer(func(s Song, at int) string { return "x" }, nil)
+	defer p.Stop()
+	p.Play([]Song{{ID: "a"}, {ID: "b"}}, 0)
+	p.StopAfterSong(true)
+	if !p.State().SleepEnd {
+		t.Fatal("SleepEnd not reported")
+	}
+	time.Sleep(time.Second)
+	st := p.State()
+	if st.Playing || st.Song.ID != "b" || st.SleepEnd {
+		t.Fatalf("after the song: playing %v, song %s, sleepEnd %v", st.Playing, st.Song.ID, st.SleepEnd)
+	}
+
+	// Seeking past the end counts as the song ending.
+	p.Play([]Song{{ID: "a", Duration: 100}, {ID: "b"}}, 0)
+	p.StopAfterSong(true)
+	p.Seek(500)
+	if st := p.State(); st.Playing || st.Song.ID != "b" {
+		t.Fatalf("after seeking past the end: playing %v, song %s", st.Playing, st.Song.ID)
+	}
+}
+
+func TestSleepText(t *testing.T) {
+	for _, c := range []struct {
+		st   NowPlaying
+		want string
+	}{
+		{NowPlaying{}, ""},
+		{NowPlaying{SleepLeft: 1}, "SLEEP 1 MIN"},
+		{NowPlaying{SleepLeft: 1741}, "SLEEP 30 MIN"},
+		{NowPlaying{SleepEnd: true}, "SLEEP AFTER THIS SONG"},
+	} {
+		if got := sleepText(c.st); got != c.want {
+			t.Errorf("sleepText(%+v) = %q, want %q", c.st, got, c.want)
+		}
+	}
+	if songCount(1) != "1 song" || songCount(2) != "2 songs" {
+		t.Error("songCount")
+	}
+}

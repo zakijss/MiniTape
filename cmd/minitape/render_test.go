@@ -24,6 +24,7 @@ func (p *stillPlayer) Next()                {}
 func (p *stillPlayer) Prev()                {}
 func (p *stillPlayer) Stop()                {}
 func (p *stillPlayer) Seek(d int)           {}
+func (p *stillPlayer) Sleep(min int)        {}
 func (p *stillPlayer) State() NowPlaying    { return p.st }
 
 // testCover is a 1000x1000 JPEG with fine detail (thin rings, stripes and

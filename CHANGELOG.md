@@ -15,6 +15,12 @@ All notable changes are listed here. The format follows
 - R2 on Now Playing stars or unstars the song.
 - L2 and R2 jump to the top and the bottom of a list.
 - START plays an album from an artist's page.
+- A sleep timer: SELECT on Now Playing pauses the music after 15 to 90 minutes, or at the end of the song. It keeps counting with MiniTape closed.
+
+### Fixed
+
+- Holding a button no longer repeats it, except to scroll: a held A paused and played over and over.
+- "1 song", not "1 songs".
 
 ### Changed
 

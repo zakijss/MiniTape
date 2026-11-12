@@ -95,10 +95,15 @@ func runDaemon(dir string) {
 	mux := http.NewServeMux()
 	var lastAsked atomic.Int64 // when the screen last asked for the state
 	lastAsked.Store(time.Now().Unix())
+	// sleepAt is when the sleep timer pauses the music (Unix seconds, 0 off)
+	var sleepAt atomic.Int64
 	mux.HandleFunc("/state", func(w http.ResponseWriter, r *http.Request) {
 		lastAsked.Store(time.Now().Unix())
 		st := pl.State()
 		st.Kbps = rl.playingRate()
+		if at := sleepAt.Load(); at > 0 {
+			st.SleepLeft = max(1, int(at-time.Now().Unix()))
+		}
 		json.NewEncoder(w).Encode(st)
 	})
 	mux.HandleFunc("/play", func(w http.ResponseWriter, r *http.Request) {
@@ -154,6 +159,16 @@ func runDaemon(dir string) {
 	mux.HandleFunc("/next", func(w http.ResponseWriter, r *http.Request) { pl.Next() })
 	mux.HandleFunc("/prev", func(w http.ResponseWriter, r *http.Request) { pl.Prev() })
 	mux.HandleFunc("/stop", func(w http.ResponseWriter, r *http.Request) { pl.Stop() })
+	// /sleep?min=30 pauses in 30 minutes; min=-1 stops at the end of the
+	// song; min=0 turns the timer off.
+	mux.HandleFunc("/sleep", func(w http.ResponseWriter, r *http.Request) {
+		m, _ := strconv.Atoi(r.URL.Query().Get("min"))
+		sleepAt.Store(0)
+		pl.StopAfterSong(m < 0)
+		if m > 0 {
+			sleepAt.Store(time.Now().Add(time.Duration(m) * time.Minute).Unix())
+		}
+	})
 	// /seek?d=-10: seconds back (negative) or forward
 	mux.HandleFunc("/seek", func(w http.ResponseWriter, r *http.Request) {
 		d, _ := strconv.Atoi(r.URL.Query().Get("d"))
@@ -255,6 +270,11 @@ func runDaemon(dir string) {
 				pl.Suspend()
 			} else {
 				pl.Resume()
+			}
+			if at := sleepAt.Load(); at > 0 && time.Now().Unix() >= at {
+				sleepAt.Store(0)
+				log.Printf("sleep timer: pausing")
+				pl.Pause()
 			}
 			st := pl.State()
 			playing := st.Has && st.Playing && !st.Paused && !st.Suspended
@@ -456,6 +476,9 @@ func (r *remote) Next()      { r.post("/next", nil) }
 func (r *remote) Prev()      { r.post("/prev", nil) }
 func (r *remote) Stop()      { r.post("/stop", nil) }
 func (r *remote) Seek(d int) { r.post("/seek?d="+strconv.Itoa(d), nil) }
+
+// Sleep sets the sleep timer: minutes, -1 for the end of the song, 0 off.
+func (r *remote) Sleep(min int) { r.post("/sleep?min="+strconv.Itoa(min), nil) }
 
 // Quit stops the music and the background player. A player that isn't
 // running is left that way.

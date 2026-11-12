@@ -20,7 +20,9 @@ A music player for [Navidrome](https://www.navidrome.org) and other Subsonic ser
 
 ## Using it
 
-The first start asks for your server, user name and password. On the now-playing screen **A** pauses, **L1**/**R1** skip, **Left**/**Right** go back or forward 10 seconds, **R2** stars or unstars the song, **Y** shows the lyrics, **X** stops and **B** goes back. **SELECT** opens the now-playing screen from anywhere in the app.
+The first start asks for your server, user name and password. On the now-playing screen **A** pauses, **L1**/**R1** skip, **Left**/**Right** go back or forward 10 seconds, **R2** stars or unstars the song, **SELECT** sets the sleep timer, **Y** shows the lyrics, **X** stops and **B** goes back. **SELECT** opens the now-playing screen from anywhere else in the app.
+
+The sleep timer pauses the music after 15 minutes to 90 minutes, or at the end of the song, and keeps counting with MiniTape closed; the time left shows at the top of the now-playing screen. The Miyoo can't tell when headphones are plugged in or out (the jack switches the speaker off by itself), so MiniTape doesn't pause on unplugging.
 
 In the lists, **Y** refreshes from the server (lists open at once from the copy on the card), **X** shuffles an album or playlist, and **L2**/**R2** jump to the top and the bottom. **Search** on the first screen finds artists, albums and songs.
 

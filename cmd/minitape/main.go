@@ -152,7 +152,8 @@ type playerCtl interface {
 	Next()
 	Prev()
 	Stop()
-	Seek(d int) // d seconds forward, or back when negative
+	Seek(d int)    // d seconds forward, or back when negative
+	Sleep(min int) // sleep timer: minutes, -1 for the end of the song, 0 off
 	State() NowPlaying
 }
 
@@ -407,7 +408,9 @@ func main() {
 			if !ok {
 				return
 			}
-			if !ev.Pressed {
+			// A held button repeats; only scrolling should; a held A, R2
+			// or Y would flip play, the star or reload over and over.
+			if !ev.Pressed || ev.Repeat && !a.scrolls(ev.Button) {
 				continue
 			}
 			if ev.Button == ui.Menu || (ev.Button == ui.B && !a.np && len(a.stack) == 1) {
@@ -845,10 +848,18 @@ func (a *app) playlists() *view {
 		pls, err := a.sub.Playlists()
 		items := make([]ui.Item, len(pls))
 		for i, x := range pls {
-			items[i] = ui.Item{Label: x.Name, Sub: fmt.Sprintf("%d songs", x.SongCount), Icon: "list", Value: x}
+			items[i] = ui.Item{Label: x.Name, Sub: songCount(x.SongCount), Icon: "list", Value: x}
 		}
 		return items, nil, err
 	})
+}
+
+// songCount is "1 song" or "12 songs".
+func songCount(n int) string {
+	if n == 1 {
+		return "1 song"
+	}
+	return fmt.Sprintf("%d songs", n)
 }
 
 func fmtDur(sec int) string { return fmt.Sprintf("%d:%02d", sec/60, sec%60) }
@@ -904,7 +915,7 @@ func (a *app) songList(title string, numbered bool, fetch func() ([]Song, error)
 			// songs line instead of adding a second one
 			v.info = v.info[:min(len(v.info), 1)]
 			if len(s) > 0 {
-				line := fmt.Sprintf("%d songs · %s", len(s), totalDur(s))
+				line := songCount(len(s)) + " · " + totalDur(s)
 				if v.year > 0 {
 					line = fmt.Sprintf("%d · %s", v.year, line)
 				}
@@ -963,8 +974,10 @@ func (a *app) handle(ev ui.Event) {
 			a.player.Seek(seekStep)
 		case ui.R2:
 			a.toggleStar(a.player.State().Song)
-		case ui.B, ui.Select:
+		case ui.B:
 			a.np = false
+		case ui.Select:
+			a.sleepTimer()
 		case ui.X:
 			a.player.Stop()
 			a.np = false
@@ -1006,6 +1019,48 @@ func (a *app) handle(ev ui.Event) {
 	default:
 		v.list.Handle(ev)
 	}
+}
+
+// scrolls reports whether b moves through a list or the lyrics, the only
+// presses that repeat while held.
+func (a *app) scrolls(b ui.Button) bool {
+	switch b {
+	case ui.Up, ui.Down:
+		return true
+	case ui.Left, ui.Right, ui.L1, ui.R1:
+		return !a.np
+	}
+	return false
+}
+
+// sleepTimers are the choices of the sleep timer, in minutes; -1 is the
+// end of the song.
+var sleepTimers = []struct {
+	label string
+	min   int
+}{{"Off", 0}, {"15 minutes", 15}, {"30 minutes", 30}, {"45 minutes", 45}, {"1 hour", 60}, {"90 minutes", 90}, {"End of this song", -1}}
+
+// sleepTimer asks when the music should stop, for falling asleep to it.
+// The background player keeps the time, so it works with MiniTape closed.
+func (a *app) sleepTimer() {
+	items := make([]ui.Item, len(sleepTimers))
+	for i, t := range sleepTimers {
+		items[i] = ui.Item{Label: t.label}
+	}
+	if i, ok := a.scr.Choose(a.input, "Sleep timer", items); ok {
+		a.player.Sleep(sleepTimers[i].min)
+	}
+}
+
+// sleepText is the sleep timer as the header shows it: "SLEEP 29 MIN".
+func sleepText(st NowPlaying) string {
+	switch {
+	case st.SleepEnd:
+		return "SLEEP AFTER THIS SONG"
+	case st.SleepLeft > 0:
+		return fmt.Sprintf("SLEEP %d MIN", (st.SleepLeft+59)/60)
+	}
+	return ""
 }
 
 // seekStep is how far Left and Right move in a song on Now Playing, in
@@ -1372,11 +1427,16 @@ func (a *app) drawNowPlaying() {
 		hx += ui.Measure(ui.Caps, pos) + 12
 	}
 	// R2 stars the song: the star, or how to give it one (the footer is
-	// full)
+	// full). The sleep timer takes the hint's place while it runs.
+	sleep := sleepText(st)
 	if st.Has && a.isStarred(st.Song) {
 		s.Icon("star", hx, 12, 22, ui.Text)
-	} else if st.Has {
+		hx += 34
+	} else if st.Has && sleep == "" {
 		s.Text(hx, 18, "R2 TO STAR", ui.Caps, ui.Faint)
+	}
+	if sleep != "" {
+		s.Text(hx, 18, sleep, ui.Caps, ui.Accent)
 	}
 	if !st.Has {
 		s.Message("Nothing playing", "Pick an album or a playlist.", ui.Hint{Button: "B", Label: "Back"})
