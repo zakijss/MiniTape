@@ -6,6 +6,12 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-12
+
+### Changed
+
+- Reaches the WireGuard and NetBird networks MiniScale 1.2 can join, through its proxy (MiniDeck 1.1.0).
+
 ## [1.1.0] - 2026-11-12
 
 ### Added
@@ -56,7 +62,8 @@ All notable changes are listed here. The format follows
 
 - The first release: browsing, background playback with an on-screen ticker, lyrics, pixel-art covers, Last.fm and ListenBrainz scrobbling, songs downloaded ahead to the card with bit rate steps, and real-time audio scheduling. Settings for the streaming quality, the room for downloaded songs (and clearing them), the menu ticker, background playback and cover art.
 
-[Unreleased]: https://github.com/zakijss/MiniTape/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/zakijss/MiniTape/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/zakijss/MiniTape/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/zakijss/MiniTape/compare/v1.0.3...v1.1.0
 [1.0.3]: https://github.com/zakijss/MiniTape/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/zakijss/MiniTape/compare/v1.0.1...v1.0.2

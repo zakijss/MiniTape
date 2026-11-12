@@ -1,5 +1,5 @@
-github.com/zakijss/minideck v1.0.3 h1:iAlKEyLeZZF9MjBxoeI55g4unoBK8m4ZEdTOUWs9Q7g=
-github.com/zakijss/minideck v1.0.3/go.mod h1:S+PxcQZzscZXyB/124oF/lSHQneBhmEEVOUdfE+ZwK4=
+github.com/zakijss/minideck v1.1.0 h1:8x3J0vngVrz0dlipfn3ea1tGSt5HigNFfk3hTmTbPks=
+github.com/zakijss/minideck v1.1.0/go.mod h1:Wn5iyrXfOULQxhd0G4rQ/DnFZHAMCtbb6CVswkptnUM=
 golang.org/x/crypto/x509roots/fallback v0.0.0-20261111203624-6bec4215b57b h1:WsXYbjUmos37zBS7kELcapHGF+Hq0xdKNsb2Yl5Oy1Q=
 golang.org/x/crypto/x509roots/fallback v0.0.0-20261111203624-6bec4215b57b/go.mod h1:HPze8vhfG6fO06AM+VSvxRm4E3+5Yk375mgrJ5M2z1E=
 golang.org/x/image v0.48.0 h1:1AvuPcuoOTJpA7s4VZ5umrb90T3So0rkB/bSGmxkxik=
