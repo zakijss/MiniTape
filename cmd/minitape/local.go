@@ -89,7 +89,8 @@ func (l *localLib) all(root string, progress func(n int)) ([]localSong, error) {
 			l.root, l.songs = ix.Root, ix.Songs
 		}
 	}
-	if l.root == root && l.songs != nil && !l.stale {
+	// (an index from before songs had their path kept is read again)
+	if l.root == root && l.songs != nil && !l.stale && (len(l.songs) == 0 || l.songs[0].Path != "") {
 		return l.songs, nil
 	}
 	old := map[string]localSong{}

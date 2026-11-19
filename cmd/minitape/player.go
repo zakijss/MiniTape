@@ -3,8 +3,10 @@ package main
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -49,6 +51,9 @@ type Player struct {
 	// prefetch, if set, is told the song after the one starting, so its
 	// stream can be fetched ahead.
 	prefetch func(s Song)
+	// root, if set, gives the music folder: songs on the card play only
+	// from inside it.
+	root func() string
 }
 
 // The repeat modes: off, the queue (it starts over after its last song)
@@ -67,6 +72,13 @@ func NewPlayer(urlFor func(Song, int) string, changed func()) *Player {
 		ff = "/mnt/SDCARD/.tmp_update/bin/ffplay"
 	}
 	return &Player{url: urlFor, ffplay: ff, changed: changed, idleSince: time.Now()}
+}
+
+// inside cleans path and reports whether it is an absolute path in the
+// folder root.
+func inside(path, root string) (string, bool) {
+	path, root = filepath.Clean(path), filepath.Clean(root)
+	return path, filepath.IsAbs(path) && filepath.IsAbs(root) && strings.HasPrefix(path, strings.TrimSuffix(root, "/")+"/")
 }
 
 // ffplayEnv routes ffplay's audio through Onion's audioserver (the same
@@ -195,10 +207,20 @@ func (p *Player) startLocked(at time.Duration) {
 	song := p.queue[p.pos]
 	args := []string{"-nodisp", "-autoexit", "-loglevel", "quiet"}
 	if song.Path != "" { // a file on the card: ffplay seeks in it
+		root := defaultMusicDir
+		if p.root != nil {
+			root = p.root()
+		}
+		path, ok := inside(song.Path, root)
+		if !ok {
+			p.err = "Not a song in the music folder."
+			return
+		}
 		if sec > 0 {
 			args = append(args, "-ss", strconv.Itoa(sec))
 		}
-		args = append(args, song.Path)
+		// file: so a name can't be read as an option or another protocol
+		args = append(args, "file:"+path)
 	} else {
 		args = append(args, p.url(song, sec))
 	}

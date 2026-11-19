@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -66,6 +67,7 @@ func TestPlayerRestore(t *testing.T) {
 	dir := t.TempDir()
 	fakeFFplay(t, "echo \"$@\" > "+filepath.Join(dir, "args")+"\nexec sleep 30")
 	p := NewPlayer(func(s Song, at int) string { return "x" }, nil)
+	p.root = func() string { return "/m" }
 	defer p.Stop()
 	p.Restore([]Song{{ID: "/m/a.mp3", Path: "/m/a.mp3"}, {ID: "/m/b.mp3", Path: "/m/b.mp3"}}, 1, 42*time.Second, repeatAll)
 	st := p.State()
@@ -75,7 +77,7 @@ func TestPlayerRestore(t *testing.T) {
 	p.Toggle()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		if b, _ := os.ReadFile(filepath.Join(dir, "args")); strings.Contains(string(b), "-ss 42 /m/b.mp3") {
+		if b, _ := os.ReadFile(filepath.Join(dir, "args")); strings.Contains(string(b), "-ss 42 file:/m/b.mp3") {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -99,7 +101,9 @@ func TestResume(t *testing.T) {
 		}
 		return Song{ID: p, Path: p, Title: name}
 	}
-	q := []Song{{ID: "srv1"}, f("1.mp3", true), f("2.mp3", false), f("3.mp3", true)}
+	outside := filepath.Join(t.TempDir(), "x.mp3") // a file, but not in the music folder
+	os.WriteFile(outside, []byte("x"), 0o644)
+	q := []Song{{ID: "srv1"}, f("1.mp3", true), f("2.mp3", false), {ID: outside, Path: outside}, f("3.mp3", true)}
 	save := func(pos int, at time.Duration) {
 		p := NewPlayer(nil, nil)
 		p.Restore(q, pos, at, repeatOne)
@@ -107,14 +111,14 @@ func TestResume(t *testing.T) {
 	}
 	// on a song that's still there
 	save(1, 40*time.Second)
-	got, pos, at, rep := loadResume(dir, "http://a u")
-	if ids(got) != ids([]Song{q[0], q[1], q[3]}) || pos != 1 || at != 40*time.Second || rep != repeatOne {
+	got, pos, at, rep := loadResume(dir, "http://a u", card)
+	if ids(got) != ids([]Song{q[0], q[1], q[4]}) || pos != 1 || at != 40*time.Second || rep != repeatOne {
 		t.Fatalf("same server: %s %d %v %d", ids(got), pos, at, rep)
 	}
 	// on the song whose file is gone, with another server set up
 	save(2, 40*time.Second)
-	got, pos, at, _ = loadResume(dir, "http://b u")
-	if ids(got) != ids([]Song{q[1], q[3]}) || pos != 1 || at != 0 {
+	got, pos, at, _ = loadResume(dir, "http://b u", card)
+	if ids(got) != ids([]Song{q[1], q[4]}) || pos != 1 || at != 0 {
 		t.Fatalf("other server: %s %d %v", ids(got), pos, at)
 	}
 	// nothing changed, nothing written
@@ -129,7 +133,7 @@ func TestResume(t *testing.T) {
 	// a stopped player saves an empty queue: nothing to restore
 	p.Stop()
 	r.save(p, p.State(), false, "")
-	if got, _, _, _ := loadResume(dir, ""); len(got) != 0 {
+	if got, _, _, _ := loadResume(dir, "", card); len(got) != 0 {
 		t.Fatalf("after stop: %s", ids(got))
 	}
 }
@@ -177,5 +181,35 @@ func TestQueueView(t *testing.T) {
 	a.handle(ui.Event{Button: ui.B, Pressed: true})
 	if !a.np || len(a.stack) != 1 {
 		t.Fatal("B didn't go back to Now Playing")
+	}
+}
+
+// A server's song keeps its "path" (where the file is on the server) out
+// of Song.Path, and the player plays from the card only inside the music
+// folder.
+func TestServerPathIsNotLocal(t *testing.T) {
+	var s Song
+	if err := json.Unmarshal([]byte(`{"id":"s1","path":"-i /etc/passwd","title":"x"}`), &s); err != nil || s.Path != "" {
+		t.Fatalf("decoded %+v, %v", s, err)
+	}
+	for _, c := range []struct {
+		path string
+		ok   bool
+	}{{"/m/a/b.mp3", true}, {"/m/../etc/x.mp3", false}, {"/mx/a.mp3", false}, {"m/a.mp3", false}, {"-y", false}, {"http://h/a.mp3", false}} {
+		if _, ok := inside(c.path, "/m"); ok != c.ok {
+			t.Errorf("inside(%q) = %v", c.path, ok)
+		}
+	}
+	dir := t.TempDir()
+	fakeFFplay(t, "echo \"$@\" >> "+filepath.Join(dir, "args")+"\nexec sleep 30")
+	p := NewPlayer(func(s Song, at int) string { return "x" }, nil)
+	p.root = func() string { return "/m" }
+	defer p.Stop()
+	p.Play([]Song{{ID: "/etc/passwd", Path: "/etc/passwd"}}, 0)
+	if st := p.State(); st.Playing || st.Err == "" {
+		t.Fatalf("played a file outside the music folder: %+v", st)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "args")); err == nil {
+		t.Fatal("ffplay started")
 	}
 }

@@ -293,6 +293,7 @@ func TestPlayerPlaysFiles(t *testing.T) {
 	defer func() { chrtPath = old }()
 	p := NewPlayer(func(s Song, at int) string { return "http://relay/" + s.ID }, nil)
 	p.prefetch = func(s Song) { t.Errorf("prefetched %s", s.ID) }
+	p.root = func() string { return "/m/" }
 	defer p.Stop()
 	q := []Song{{ID: "/m/a.mp3", Path: "/m/a.mp3", Duration: 100}, {ID: "/m/b.mp3", Path: "/m/b.mp3"}}
 	// waitArgs returns the arguments ffplay was started with, once it has
@@ -313,7 +314,7 @@ func TestPlayerPlaysFiles(t *testing.T) {
 	p.Play(q, 0)
 	waitArgs(1)
 	p.Seek(30)
-	if got := waitArgs(2); !strings.HasSuffix(strings.Split(got, "\n")[0], "-loglevel quiet /m/a.mp3") || !strings.Contains(got, "-ss 30 /m/a.mp3\n") {
+	if got := waitArgs(2); !strings.HasSuffix(strings.Split(got, "\n")[0], "-loglevel quiet file:/m/a.mp3") || !strings.Contains(got, "-ss 30 file:/m/a.mp3\n") {
 		t.Fatalf("ffplay args:\n%s", got)
 	}
 }

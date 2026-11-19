@@ -91,8 +91,13 @@ func runDaemon(dir string) {
 	}
 	pl := NewPlayer(rl.URL, nil)
 	pl.prefetch = rl.Prefetch
+	pl.root = func() string {
+		cfgMu.Lock()
+		defer cfgMu.Unlock()
+		return cfg.musicDir()
+	}
 	// the queue as it was at the last exit, paused
-	pl.Restore(loadResume(dir, serverOf(cfg)))
+	pl.Restore(loadResume(dir, serverOf(cfg), cfg.musicDir()))
 	res := &resumer{dir: dir, qver: pl.State().Queue}
 	saveResume := func() {
 		st := pl.State()

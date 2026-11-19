@@ -82,10 +82,10 @@ func writeJSON(path string, v any) error {
 }
 
 // loadResume reads the saved queue and place, keeping the songs that can
-// still play: the card's whose files are there, and the server's if it is
-// still the one set up (server). The place moves to the next song kept
+// still play: the card's whose files are there in the music folder root,
+// and the server's if it is still the one set up (server). The place moves to the next song kept
 // when its own is gone.
-func loadResume(dir, server string) (q []Song, pos int, at time.Duration, repeat int) {
+func loadResume(dir, server, root string) (q []Song, pos int, at time.Duration, repeat int) {
 	var sq savedQueue
 	var sp savedPlace
 	b, err := os.ReadFile(filepath.Join(dir, savedQueueFile))
@@ -104,7 +104,11 @@ func loadResume(dir, server string) (q []Song, pos int, at time.Duration, repeat
 	newPos := -1
 	for i, s := range sq.Songs {
 		if s.Path != "" {
-			if _, err := os.Stat(s.Path); err != nil {
+			p, ok := inside(s.Path, root)
+			if !ok {
+				continue
+			}
+			if _, err := os.Stat(p); err != nil {
 				continue
 			}
 		} else if server == "" || sq.Server != server {

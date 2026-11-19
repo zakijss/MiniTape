@@ -92,8 +92,9 @@ type Song struct {
 	Genre        string `json:"genre,omitempty"`
 	Starred      string `json:"starred,omitempty"` // when it was starred; empty if not
 	// Path is the file on the card, for a song played from there (its ID
-	// is the path too); empty for the server's songs.
-	Path string `json:"path,omitempty"`
+	// is the path too); empty for the server's songs. Not "path": Subsonic
+	// replies use that for the file's place on the server.
+	Path string `json:"localPath,omitempty"`
 }
 
 // Album is an album; Song is filled in only by Subsonic.Album.
