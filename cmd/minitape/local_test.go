@@ -612,3 +612,11 @@ func TestWindow(t *testing.T) {
 		t.Errorf("a short queue: %d songs, at %d", len(w), at)
 	}
 }
+
+func TestPlural(t *testing.T) {
+	for n, want := range map[int]string{0: "0 albums", 1: "1 album", 2: "2 albums"} {
+		if got := plural(n, "album"); got != want {
+			t.Errorf("plural(%d) = %q, want %q", n, got, want)
+		}
+	}
+}

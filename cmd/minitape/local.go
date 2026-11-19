@@ -433,13 +433,9 @@ func (a *app) localArtists() *view {
 		ars := localArtists(all)
 		items := make([]ui.Item, len(ars))
 		for i, x := range ars {
-			n := "1 album"
-			if x.AlbumCount != 1 {
-				n = fmt.Sprintf("%d albums", x.AlbumCount)
-			}
-			items[i] = ui.Item{Label: x.Name, Sub: n, Icon: "person", Tint: ui.Muted, Value: x}
+			items[i] = ui.Item{Label: x.Name, Sub: plural(x.AlbumCount, "album"), Icon: "person", Tint: ui.Muted, Value: x}
 		}
-		sub := fmt.Sprintf("%d artists", len(ars))
+		sub := plural(len(ars), "artist")
 		return items, func() { v.sub = sub }, nil
 	})
 }
@@ -454,7 +450,7 @@ func (a *app) localAlbums() *view {
 	}
 	return a.loadLocal(v, func(all []localSong) ([]ui.Item, func(), error) {
 		al := localAlbums(all)
-		sub := fmt.Sprintf("%d albums", len(al))
+		sub := plural(len(al), "album")
 		return a.albumItems(al), func() { v.sub = sub }, nil
 	})
 }

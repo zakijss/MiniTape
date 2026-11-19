@@ -70,7 +70,7 @@ func TestLoadWhileDrawing(t *testing.T) {
 	v := a.albumList("Recently added", "newest")
 	a.push(v)
 	a.waitLoaded(t, v)
-	if len(v.list.Items) != 1 || v.sub != "1 albums" || v.err != "" {
+	if len(v.list.Items) != 1 || v.sub != "1 album" || v.err != "" {
 		t.Fatalf("album list: %d items, sub %q, err %q", len(v.list.Items), v.sub, v.err)
 	}
 
@@ -86,7 +86,7 @@ func TestLoadWhileDrawing(t *testing.T) {
 	ar := a.artists()
 	a.push(ar)
 	a.waitLoaded(t, ar)
-	if len(ar.list.Items) != 1 || ar.sub != "1 artists" {
+	if len(ar.list.Items) != 1 || ar.sub != "1 artist" {
 		t.Fatalf("artists: %d items, sub %q", len(ar.list.Items), ar.sub)
 	}
 

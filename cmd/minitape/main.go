@@ -758,7 +758,7 @@ func (a *app) albumList(title, typ string) *view {
 	}
 	return a.load(v, func() ([]ui.Item, func(), error) {
 		al, err := a.sub.AlbumList(typ, 100)
-		sub := fmt.Sprintf("%d albums", len(al))
+		sub := plural(len(al), "album")
 		return a.albumItems(al), func() { v.sub = sub }, err
 	})
 }
@@ -805,7 +805,7 @@ func (a *app) openArtist(ar Artist) {
 		if err != nil {
 			return nil, nil, err
 		}
-		sub := fmt.Sprintf("%d albums", len(albums))
+		sub := plural(len(albums), "album")
 		return a.albumItems(albums), func() { av.sub = sub }, nil
 	}))
 }
@@ -877,14 +877,10 @@ func (a *app) artists() *view {
 	}
 	return a.load(v, func() ([]ui.Item, func(), error) {
 		ars, err := a.sub.Artists()
-		sub := fmt.Sprintf("%d artists", len(ars))
+		sub := plural(len(ars), "artist")
 		items := make([]ui.Item, len(ars))
 		for i, x := range ars {
-			n := "1 album"
-			if x.AlbumCount != 1 {
-				n = fmt.Sprintf("%d albums", x.AlbumCount)
-			}
-			items[i] = ui.Item{Label: x.Name, Sub: n, Icon: "person", Tint: ui.Muted, Value: x}
+			items[i] = ui.Item{Label: x.Name, Sub: plural(x.AlbumCount, "album"), Icon: "person", Tint: ui.Muted, Value: x}
 		}
 		return items, func() { v.sub = sub }, err
 	})
@@ -917,11 +913,14 @@ func (a *app) playlists() *view {
 }
 
 // songCount is "1 song" or "12 songs".
-func songCount(n int) string {
+func songCount(n int) string { return plural(n, "song") }
+
+// plural is "1 album" or "12 albums".
+func plural(n int, word string) string {
 	if n == 1 {
-		return "1 song"
+		return "1 " + word
 	}
-	return fmt.Sprintf("%d songs", n)
+	return fmt.Sprintf("%d %ss", n, word)
 }
 
 func fmtDur(sec int) string { return fmt.Sprintf("%d:%02d", sec/60, sec%60) }
