@@ -54,6 +54,9 @@ type Player struct {
 	// root, if set, gives the music folder: songs on the card play only
 	// from inside it.
 	root func() string
+	// minPlayed is the least a song started from its beginning must play
+	// to count as played rather than failed.
+	minPlayed time.Duration
 }
 
 // The repeat modes: off, the queue (it starts over after its last song)
@@ -71,7 +74,7 @@ func NewPlayer(urlFor func(Song, int) string, changed func()) *Player {
 	if ff == "" {
 		ff = "/mnt/SDCARD/.tmp_update/bin/ffplay"
 	}
-	return &Player{url: urlFor, ffplay: ff, changed: changed, idleSince: time.Now()}
+	return &Player{url: urlFor, ffplay: ff, changed: changed, idleSince: time.Now(), minPlayed: time.Second}
 }
 
 // inside cleans path and reports whether it is an absolute path in the
@@ -249,7 +252,10 @@ func (p *Player) startLocked(at time.Duration) {
 		p.mu.Lock()
 		if gen == p.gen { // the track ended by itself
 			played := time.Since(p.started) - p.pausedD
-			if err != nil && played < 3*time.Second {
+			// a song that ends at once from its start (empty, or a format
+			// ffplay can't read) fails too: with repeat it would start
+			// again and again, a play counted each time
+			if err != nil && played < 3*time.Second || p.offset == 0 && played < p.minPlayed {
 				p.err = "Playback failed (server, network or format)."
 				p.cmd = nil
 				p.idleSince = time.Now()
@@ -268,7 +274,8 @@ func (p *Player) startLocked(at time.Duration) {
 // songEndedLocked goes on after a track has finished (ffplay has
 // exited): to the next one, the same one again (repeat one), the first
 // (repeat all, at the end), or nowhere at the end of the queue or when the
-// sleep timer stops after this song (A later plays the next one).
+// sleep timer stops after this song, whatever the repeat mode (A later
+// plays the next one).
 func (p *Player) songEndedLocked() {
 	switch {
 	case p.endOfSong:

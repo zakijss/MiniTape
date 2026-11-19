@@ -92,9 +92,42 @@ type Song struct {
 	Genre        string `json:"genre,omitempty"`
 	Starred      string `json:"starred,omitempty"` // when it was starred; empty if not
 	// Path is the file on the card, for a song played from there (its ID
-	// is the path too); empty for the server's songs. Not "path": Subsonic
-	// replies use that for the file's place on the server.
+	// is the path too); empty for the server's songs. No server reply can
+	// set it: it is kept only in MiniTape's own JSON, through ownSong.
+	Path string `json:"-"`
+}
+
+// ownSong is a Song in MiniTape's own JSON (between the screen and the
+// player, and in the saved queue), the only JSON that carries Path.
+type ownSong struct {
+	Song
 	Path string `json:"localPath,omitempty"`
+}
+
+func own(s Song) ownSong { return ownSong{s, s.Path} }
+
+func ownSongs(q []Song) []ownSong {
+	o := make([]ownSong, len(q))
+	for i, s := range q {
+		o[i] = own(s)
+	}
+	return o
+}
+
+func (o ownSong) song() Song {
+	o.Song.Path = o.Path
+	return o.Song
+}
+
+func fromOwn(o []ownSong) []Song {
+	if o == nil {
+		return nil
+	}
+	q := make([]Song, len(o))
+	for i, s := range o {
+		q[i] = s.song()
+	}
+	return q
 }
 
 // Album is an album; Song is filled in only by Subsonic.Album.

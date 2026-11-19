@@ -7,10 +7,13 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -314,7 +317,10 @@ func TestPlayerPlaysFiles(t *testing.T) {
 	p.Play(q, 0)
 	waitArgs(1)
 	p.Seek(30)
-	if got := waitArgs(2); !strings.HasSuffix(strings.Split(got, "\n")[0], "-loglevel quiet file:/m/a.mp3") || !strings.Contains(got, "-ss 30 file:/m/a.mp3\n") {
+	// 30 s on from the time played, which is 1 s on a slow machine
+	got := waitArgs(2)
+	if !strings.HasSuffix(strings.Split(got, "\n")[0], "-loglevel quiet file:/m/a.mp3") ||
+		!strings.Contains(got, "-ss 30 file:/m/a.mp3\n") && !strings.Contains(got, "-ss 31 file:/m/a.mp3\n") {
 		t.Fatalf("ffplay args:\n%s", got)
 	}
 }
@@ -329,15 +335,29 @@ func TestPlayerRepeat(t *testing.T) {
 	chrtPath = ""
 	defer func() { chrtPath = old }()
 	p := NewPlayer(func(s Song, at int) string { return "x" }, nil)
+	p.minPlayed = 50 * time.Millisecond // the fake songs play 0.2 s
 	defer p.Stop()
+	// waitFor waits for the player to be in a state ok accepts.
+	waitFor := func(what string, ok func(st NowPlaying) bool) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for st := p.State(); !ok(st); st = p.State() {
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: %+v", what, st)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
 	p.SetRepeat(repeatOne)
 	p.Play([]Song{{ID: "a"}, {ID: "b"}}, 0)
 	plays := p.State().Plays
-	time.Sleep(700 * time.Millisecond)
-	if st := p.State(); st.Song.ID != "a" || !st.Playing || st.Plays <= plays || st.Repeat != repeatOne {
-		t.Fatalf("repeat one: %+v", st)
-	}
+	waitFor("repeat one", func(st NowPlaying) bool {
+		return st.Song.ID == "a" && st.Playing && st.Plays > plays && st.Repeat == repeatOne
+	})
 	p.SetRepeat(repeatAll)
+	p.Play([]Song{{ID: "a"}, {ID: "b"}}, 1) // the last song ends: the first plays
+	plays = p.State().Plays
+	waitFor("repeat all, at the end", func(st NowPlaying) bool { return st.Song.ID == "a" && st.Playing && st.Plays > plays })
 	p.Play([]Song{{ID: "a"}, {ID: "b"}}, 1)
 	p.Next()
 	if st := p.State(); st.Song.ID != "a" || !st.Playing {
@@ -350,6 +370,24 @@ func TestPlayerRepeat(t *testing.T) {
 	p.Play([]Song{{ID: "a"}}, 0) // the same song again is a new play
 	if p.State().Plays == before {
 		t.Fatal("playing the song again isn't a new play")
+	}
+}
+
+// A song that ends as soon as it starts (an empty or unreadable file)
+// fails: with repeat on it isn't started again and again, each a play.
+func TestPlayerFastExit(t *testing.T) {
+	dir := t.TempDir()
+	fakeFFplay(t, "echo x >> "+filepath.Join(dir, "runs")+"\nexit 0")
+	p := NewPlayer(func(s Song, at int) string { return "x" }, nil)
+	defer p.Stop()
+	p.SetRepeat(repeatOne)
+	p.Play([]Song{{ID: "a"}, {ID: "b"}}, 0)
+	plays := p.State().Plays
+	time.Sleep(1500 * time.Millisecond)
+	st := p.State()
+	b, _ := os.ReadFile(filepath.Join(dir, "runs"))
+	if st.Playing || st.Err == "" || st.Plays != plays || len(b) != 2 {
+		t.Fatalf("after a song that ends at once: %+v, ffplay ran %d times", st, len(b)/2)
 	}
 }
 
@@ -424,10 +462,10 @@ func TestReadPicture(t *testing.T) {
 		t.Errorf("a cover from a file without one: %d bytes", len(got))
 	}
 	// shown as a cover, scaled
-	if img, err := localCover(nil, embedPrefix+filepath.Join(dir, "b.flac"), 16); err != nil || img.Bounds().Dx() != 16 {
+	if img, err := localCover(nil, embedPrefix+filepath.Join(dir, "b.flac"), dir, 16); err != nil || img.Bounds().Dx() != 16 {
 		t.Fatalf("cover: %v", err)
 	}
-	if _, err := localCover(nil, embedPrefix+filepath.Join(dir, "e.flac"), 16); err == nil {
+	if _, err := localCover(nil, embedPrefix+filepath.Join(dir, "e.flac"), dir, 16); err == nil {
 		t.Fatal("a cover from a file without one")
 	}
 }
@@ -463,5 +501,114 @@ func TestTagsOnBrokenFiles(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "h.flac"), huge, 0o644)
 	if readPicture(filepath.Join(dir, "h.flac")) != nil {
 		t.Fatal("a picture from nothing")
+	}
+}
+
+// Covers and lyrics are read only from regular files in the music folder:
+// a server can send any cover id, and a file elsewhere, a device, a FIFO
+// or a file too big must not be read (or hang the reader).
+func TestCardFilesOnly(t *testing.T) {
+	root, other := t.TempDir(), t.TempDir()
+	pic := testPNG(t)
+	os.WriteFile(filepath.Join(root, "cover.png"), pic, 0o644)
+	os.WriteFile(filepath.Join(other, "cover.png"), pic, 0o644)
+	if _, err := localCover(nil, filePrefix+filepath.Join(root, "cover.png"), root, 16); err != nil {
+		t.Fatalf("a cover in the music folder: %v", err)
+	}
+	big := filepath.Join(root, "big.png")
+	os.WriteFile(big, nil, 0o644)
+	os.Truncate(big, maxPicture+10)
+	fifo := filepath.Join(root, "fifo.png")
+	if err := syscall.Mkfifo(fifo, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ id, root string }{
+		{filePrefix + filepath.Join(other, "cover.png"), root},
+		{filePrefix + root + "/../" + filepath.Base(other) + "/cover.png", root},
+		{embedPrefix + filepath.Join(other, "cover.png"), root},
+		{filePrefix + "/dev/zero", root},
+		{filePrefix + "/dev/zero", "/dev"}, // in the folder, but not a file
+		{filePrefix + fifo, root},
+		{embedPrefix + fifo, root},
+		{filePrefix + big, root},
+	} {
+		if _, err := localCover(nil, c.id, c.root, 16); err == nil {
+			t.Errorf("read cover %s in %s", c.id, c.root)
+		}
+	}
+	// lyrics: from a .lrc next to a song in the folder, not elsewhere
+	for _, d := range []string{root, other} {
+		os.WriteFile(filepath.Join(d, "a.mp3"), testMP3(10), 0o644)
+		os.WriteFile(filepath.Join(d, "a.lrc"), []byte("[00:01.00]hello"), 0o644)
+	}
+	if lines, _ := localLyrics(filepath.Join(root, "a.mp3"), root); len(lines) != 1 {
+		t.Errorf("lyrics in the folder: %+v", lines)
+	}
+	if lines, _ := localLyrics(filepath.Join(other, "a.mp3"), root); len(lines) != 0 {
+		t.Errorf("lyrics from outside the folder: %+v", lines)
+	}
+	os.Remove(filepath.Join(root, "a.lrc"))
+	syscall.Mkfifo(filepath.Join(root, "a.lrc"), 0o644)
+	if lines, _ := localLyrics(filepath.Join(root, "a.mp3"), root); len(lines) != 0 {
+		t.Errorf("lyrics from a FIFO: %+v", lines)
+	}
+}
+
+// countReads counts the reads made of a file.
+type countReads struct {
+	r io.ReaderAt
+	n int
+}
+
+func (c *countReads) ReadAt(b []byte, off int64) (int, error) {
+	c.n++
+	return c.r.ReadAt(b, off)
+}
+
+// A crafted file with thousands of empty WAV chunks or MP4 boxes is walked
+// only so far.
+func TestTagsChunkCap(t *testing.T) {
+	wav := []byte("RIFF\x00\x00\x00\x00WAVE")
+	for range 20000 {
+		wav = append(wav, "junk\x00\x00\x00\x00"...)
+	}
+	r := &countReads{r: bytes.NewReader(wav)}
+	var tg tags
+	tg.wav(r, int64(len(wav)))
+	if r.n > maxChunks+2 {
+		t.Errorf("wav: %d reads", r.n)
+	}
+	// 100 boxes of 100 empty boxes each: capped in all, not per level
+	var inner []byte
+	for range 100 {
+		inner = append(inner, box("free")...)
+	}
+	var m4a []byte
+	for range 100 {
+		m4a = append(m4a, box("moov", inner)...)
+	}
+	r = &countReads{r: bytes.NewReader(m4a)}
+	tg = tags{}
+	tg.atoms(r, 0, int64(len(m4a)), false, 0)
+	if r.n > maxChunks+2 {
+		t.Errorf("mp4: %d reads", r.n)
+	}
+}
+
+// A folder with thousands of songs below it queues at most maxLocalQueue,
+// from a few before the chosen song on.
+func TestWindow(t *testing.T) {
+	q := make([]Song, 2000)
+	for i := range q {
+		q[i].ID = strconv.Itoa(i)
+	}
+	for _, c := range []struct{ i, first int }{{0, 0}, {10, 0}, {1000, 1000 - maxLocalQueue/10}, {1999, 2000 - maxLocalQueue}} {
+		w, at := window(q, c.i)
+		if len(w) != maxLocalQueue || w[0].ID != q[c.first].ID || w[at].ID != q[c.i].ID {
+			t.Errorf("song %d: %d songs from %s, at %d", c.i, len(w), w[0].ID, at)
+		}
+	}
+	if w, at := window(q[:3], 2); len(w) != 3 || at != 2 {
+		t.Errorf("a short queue: %d songs, at %d", len(w), at)
 	}
 }

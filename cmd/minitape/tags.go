@@ -27,6 +27,7 @@ type tags struct {
 	pic      bool
 	picture  []byte
 	picFront bool
+	boxes    int // MP4 boxes read, in all levels
 }
 
 const (
@@ -37,6 +38,9 @@ const (
 	// maxSecs is the longest length believed: a broken or hostile file
 	// can claim anything.
 	maxSecs = 100 * 3600
+	// maxChunks caps the MP4 boxes or WAV chunks walked in a file: a
+	// crafted one can hold millions of empty ones.
+	maxChunks = 4096
 )
 
 // secs is a length in seconds, 0 when it can't be right (and before it
@@ -619,7 +623,7 @@ func (t *tags) ogg(r io.ReaderAt, size int64) {
 // atoms reads the MP4 boxes between start and end: the length from mvhd,
 // the tags from the items in ilst.
 func (t *tags) atoms(r io.ReaderAt, start, end int64, inList bool, depth int) {
-	for pos, boxes := start, 0; pos+8 <= end && depth < 6 && boxes < 4096; boxes++ {
+	for pos := start; pos+8 <= end && depth < 6 && t.boxes < maxChunks; t.boxes++ {
 		h := readAt(r, pos, 16)
 		if len(h) < 8 {
 			return
@@ -683,7 +687,7 @@ func (t *tags) wav(r io.ReaderAt, size int64) {
 		return
 	}
 	byteRate := int64(0)
-	for pos := int64(12); pos+8 <= size; {
+	for pos, chunks := int64(12), 0; pos+8 <= size && chunks < maxChunks; chunks++ {
 		c := readAt(r, pos, 8)
 		if len(c) < 8 {
 			return

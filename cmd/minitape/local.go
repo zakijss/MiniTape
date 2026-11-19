@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"io"
 	"log"
 	"math/rand"
 	"os"
@@ -37,7 +38,7 @@ const (
 	filePrefix  = "file:"
 	embedPrefix = "embed:"
 	// maxLocalQueue caps a queue of songs from the card (Shuffle this
-	// card), as the server's Shuffle everything asks for 200.
+	// card, a folder), as the server's Shuffle everything asks for 200.
 	maxLocalQueue = 500
 )
 
@@ -87,10 +88,12 @@ func (l *localLib) all(root string, progress func(n int)) ([]localSong, error) {
 				log.Printf("%s: %v", l.file, err)
 			}
 			l.root, l.songs = ix.Root, ix.Songs
+			for i := range l.songs { // a song on the card is named by its path
+				l.songs[i].Path = l.songs[i].ID
+			}
 		}
 	}
-	// (an index from before songs had their path kept is read again)
-	if l.root == root && l.songs != nil && !l.stale && (len(l.songs) == 0 || l.songs[0].Path != "") {
+	if l.root == root && l.songs != nil && !l.stale {
 		return l.songs, nil
 	}
 	old := map[string]localSong{}
@@ -384,7 +387,7 @@ func (a *app) localFolder(dir string) *view {
 		case string:
 			a.push(a.localFolder(x))
 		case int:
-			a.player.Play(v.songs, x)
+			a.player.Play(window(v.songs, x))
 			a.np = true
 		}
 	}
@@ -401,7 +404,7 @@ func (a *app) localFolder(dir string) *view {
 		go func() {
 			all, err := a.localSongs()
 			if songs, _, _ := folderContents(all, d); err == nil && len(songs) > 0 {
-				a.player.Play(songs, 0)
+				a.player.Play(window(songs, 0))
 				a.poke()
 			}
 		}()
@@ -487,6 +490,14 @@ func (a *app) artistAlbums(ar Artist) ([]Album, error) {
 	return full.Album, nil
 }
 
+// window is at most maxLocalQueue songs of q from around song i (a few
+// before it, the rest after), and i's place in them: a folder can hold
+// thousands below it.
+func window(q []Song, i int) ([]Song, int) {
+	start := max(0, min(i-maxLocalQueue/10, len(q)-maxLocalQueue))
+	return q[start:min(len(q), start+maxLocalQueue)], i - start
+}
+
 // playShuffled plays songs in a random order.
 func (a *app) playShuffled(songs []Song) {
 	if len(songs) == 0 {
@@ -498,12 +509,12 @@ func (a *app) playShuffled(songs []Song) {
 	a.np = true
 }
 
-// coverImage is the cover id at px: a picture on the card, or the
-// server's.
-func (a *app) coverImage(id string, px int) (image.Image, error) {
+// coverImage is the cover id at px: a picture on the card (in the music
+// folder root), or the server's.
+func (a *app) coverImage(id, root string, px int) (image.Image, error) {
 	switch {
 	case strings.HasPrefix(id, filePrefix), strings.HasPrefix(id, embedPrefix):
-		return localCover(a.sub.Cache, id, px)
+		return localCover(a.sub.Cache, id, root, px)
 	case strings.HasPrefix(id, localPrefix):
 		return nil, errors.New("no cover")
 	}
@@ -512,10 +523,11 @@ func (a *app) coverImage(id string, px int) (image.Image, error) {
 
 // localCover reads the cover id on the card, a picture file (filePrefix)
 // or the one in a song's tags (embedPrefix), scaled to px, keeping the
-// scaled one in c.
-func localCover(c *cache.Disk, id string, px int) (image.Image, error) {
+// scaled one in c. Only files in the music folder root are read: a cover
+// id can come from the server.
+func localCover(c *cache.Disk, id, root string, px int) (image.Image, error) {
 	kind, path, _ := strings.Cut(id, ":")
-	fi, err := os.Stat(path)
+	path, fi, err := cardFile(path, root)
 	if err != nil {
 		return nil, err
 	}
@@ -527,17 +539,49 @@ func localCover(c *cache.Disk, id string, px int) (image.Image, error) {
 			}
 			return nil, errors.New("no cover")
 		}
-		if fi.Size() > maxPicture {
-			return nil, errors.New("cover too large")
+		b, err := readCardFile(path, root, maxPicture)
+		if err == nil && len(b) > maxPicture {
+			err = errors.New("cover too large")
 		}
-		return os.ReadFile(path)
+		return b, err
 	})
 }
 
-// songLyrics are a song's lyrics, from the card or the server.
-func (a *app) songLyrics(s Song) ([]LyricLine, bool, error) {
+// cardFile cleans path and checks it is a regular file in the music folder
+// root: not a file elsewhere, a device or a FIFO, which a hostile id could
+// name to read any file or hang the reader.
+func cardFile(path, root string) (string, os.FileInfo, error) {
+	path, ok := inside(path, root)
+	if !ok {
+		return "", nil, errors.New("not in the music folder")
+	}
+	fi, err := os.Lstat(path)
+	if err == nil && !fi.Mode().IsRegular() {
+		err = errors.New("not a file")
+	}
+	return path, fi, err
+}
+
+// readCardFile reads the file at path, checked by cardFile, up to max+1
+// bytes: more than max means it is too big.
+func readCardFile(path, root string, max int64) ([]byte, error) {
+	path, _, err := cardFile(path, root)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(io.LimitReader(f, max+1))
+}
+
+// songLyrics are a song's lyrics, from the card (in the music folder root)
+// or the server.
+func (a *app) songLyrics(s Song, root string) ([]LyricLine, bool, error) {
 	if s.Path != "" {
-		lines, synced := localLyrics(s.Path)
+		lines, synced := localLyrics(s.Path, root)
 		return lines, synced, nil
 	}
 	return a.sub.Lyrics(s)
@@ -545,9 +589,12 @@ func (a *app) songLyrics(s Song) ([]LyricLine, bool, error) {
 
 // localLyrics reads a song's lyrics from a .lrc file next to it, or from
 // its tags.
-func localLyrics(path string) ([]LyricLine, bool) {
-	if b, err := os.ReadFile(strings.TrimSuffix(path, filepath.Ext(path)) + ".lrc"); err == nil {
+func localLyrics(path, root string) ([]LyricLine, bool) {
+	if b, err := readCardFile(strings.TrimSuffix(path, filepath.Ext(path))+".lrc", root, maxFrame); err == nil {
 		return parseLRC(string(b))
+	}
+	if _, _, err := cardFile(path, root); err != nil {
+		return nil, false
 	}
 	return parseLRC(readTags(path).Lyrics)
 }

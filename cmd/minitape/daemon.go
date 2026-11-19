@@ -119,18 +119,18 @@ func runDaemon(dir string) {
 		if at := sleepAt.Load(); at > 0 {
 			st.SleepLeft = max(1, int(at-time.Now().Unix()))
 		}
-		json.NewEncoder(w).Encode(st)
+		json.NewEncoder(w).Encode(ownState{st, own(st.Song), ownSongs(st.Next)})
 	})
 	mux.HandleFunc("/play", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Queue []Song
+			Queue []ownSong
 			Index int
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		pl.Play(req.Queue, req.Index)
+		pl.Play(fromOwn(req.Queue), req.Index)
 	})
 	// /play-song?q=...: play the best match from the start, then the rest of
 	// its album (or random songs, if it's the album's last).
@@ -176,9 +176,8 @@ func runDaemon(dir string) {
 	mux.HandleFunc("/stop", func(w http.ResponseWriter, r *http.Request) { pl.Stop() })
 	// the queue, for the screen's list of it, and changes to it
 	mux.HandleFunc("/queue", func(w http.ResponseWriter, r *http.Request) {
-		var q queueReply
-		q.Songs, q.Pos = pl.Queue()
-		json.NewEncoder(w).Encode(q)
+		songs, pos := pl.Queue()
+		json.NewEncoder(w).Encode(queueReply{ownSongs(songs), pos})
 	})
 	edit := func(f func(e queueEdit)) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
@@ -518,9 +517,9 @@ func dialFailed(err error) bool {
 
 func (r *remote) Play(q []Song, i int) {
 	r.post("/play", struct {
-		Queue []Song
+		Queue []ownSong
 		Index int
-	}{q, i})
+	}{ownSongs(q), i})
 }
 func (r *remote) Toggle()    { r.post("/toggle", nil) }
 func (r *remote) Next()      { r.post("/next", nil) }
@@ -530,8 +529,16 @@ func (r *remote) Seek(d int) { r.post("/seek?d="+strconv.Itoa(d), nil) }
 
 // queueReply is the player's answer to /queue.
 type queueReply struct {
-	Songs []Song
+	Songs []ownSong
 	Pos   int
+}
+
+// ownState is the player's answer to /state: NowPlaying with the songs'
+// paths on the card.
+type ownState struct {
+	NowPlaying
+	Song ownSong
+	Next []ownSong
 }
 
 // queueEdit is a change to song I of the queue, named by its ID too (see
@@ -550,7 +557,7 @@ func (r *remote) Queue() ([]Song, int, error) {
 	defer resp.Body.Close()
 	var q queueReply
 	err = json.NewDecoder(resp.Body).Decode(&q)
-	return q.Songs, q.Pos, err
+	return fromOwn(q.Songs), q.Pos, err
 }
 
 func (r *remote) Jump(i int, id string)    { r.post("/jump", queueEdit{I: i, ID: id}) }
@@ -618,7 +625,13 @@ func (r *remote) get(st *NowPlaying) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("player said %s", resp.Status)
 	}
-	return json.NewDecoder(resp.Body).Decode(st)
+	var o ownState
+	if err := json.NewDecoder(resp.Body).Decode(&o); err != nil {
+		return err
+	}
+	*st = o.NowPlaying
+	st.Song, st.Next = o.Song.song(), fromOwn(o.Next)
+	return nil
 }
 
 // daemonAlive reports whether the background player answers within wait.

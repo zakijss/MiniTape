@@ -11,12 +11,27 @@ func (a *app) queueView() *view {
 		hints: []ui.Hint{{Button: "A", Label: "Play"}, {Button: "X", Label: "Remove"}, {Button: "L2/R2", Label: "Move"}}}
 	var songs []Song
 	qver, first := -1, true
+	// seq numbers the reads of the queue: an older one that answers late
+	// is dropped
+	seq := 0
+	// moved is the song L2 or R2 moved and the place it went to: the
+	// selection goes there once the queue read shows it (not when the
+	// player refused the move)
+	var moved struct {
+		i  int
+		id string
+	}
 	v.update = func(st NowPlaying) {
 		if st.Queue != qver {
 			qver = st.Queue
+			seq++
+			mine := seq
 			go func() {
 				q, pos, err := a.player.Queue()
 				a.done <- func() {
+					if mine != seq {
+						return
+					}
 					v.loading = false
 					if err != nil {
 						v.err = err.Error()
@@ -28,6 +43,10 @@ func (a *app) queueView() *view {
 					if first { // start on the current song
 						v.list.Sel, first = pos, false
 					}
+					if moved.id != "" && moved.i < len(q) && q[moved.i].ID == moved.id {
+						v.list.Sel = moved.i
+					}
+					moved.id = ""
 					if len(q) == 0 {
 						v.err = "Nothing in the queue."
 					}
@@ -77,8 +96,8 @@ func (a *app) queueView() *view {
 				d = -1
 			}
 			if i, id, ok := sel(); ok && i+d >= 0 && i+d < len(songs) {
+				moved.i, moved.id = i+d, id
 				a.player.Move(i, d, id)
-				v.list.Sel = i + d // the selection goes with the song
 			}
 		default:
 			return false

@@ -24,8 +24,8 @@ const (
 type savedQueue struct {
 	// Server is whose songs these are (see serverOf): the server's songs
 	// are dropped when another server, or none, is set up now.
-	Server string `json:"server,omitempty"`
-	Songs  []Song `json:"songs"`
+	Server string    `json:"server,omitempty"`
+	Songs  []ownSong `json:"songs"`
 }
 
 type savedPlace struct {
@@ -55,7 +55,7 @@ type resumer struct {
 func (r *resumer) save(pl *Player, st NowPlaying, playing bool, server string) {
 	if st.Queue != r.qver {
 		q, _ := pl.Queue()
-		if err := writeJSON(filepath.Join(r.dir, savedQueueFile), savedQueue{server, q}); err != nil {
+		if err := writeJSON(filepath.Join(r.dir, savedQueueFile), savedQueue{server, ownSongs(q)}); err != nil {
 			log.Printf("saving the queue: %v", err)
 			return
 		}
@@ -83,8 +83,8 @@ func writeJSON(path string, v any) error {
 
 // loadResume reads the saved queue and place, keeping the songs that can
 // still play: the card's whose files are there in the music folder root,
-// and the server's if it is still the one set up (server). The place moves to the next song kept
-// when its own is gone.
+// and the server's if it is still the one set up (server). The place moves
+// to the next song kept when its own is gone.
 func loadResume(dir, server, root string) (q []Song, pos int, at time.Duration, repeat int) {
 	var sq savedQueue
 	var sp savedPlace
@@ -92,17 +92,18 @@ func loadResume(dir, server, root string) (q []Song, pos int, at time.Duration, 
 	if err != nil || json.Unmarshal(b, &sq) != nil || len(sq.Songs) == 0 {
 		return nil, 0, 0, 0
 	}
+	songs := fromOwn(sq.Songs)
 	if b, err := os.ReadFile(filepath.Join(dir, savedPlaceFile)); err == nil {
 		json.Unmarshal(b, &sp) // without it: from the start
 	}
 	pos, at = sp.Pos, time.Duration(max(0, sp.Sec))*time.Second
-	if pos < 0 || pos >= len(sq.Songs) || sq.Songs[pos].ID != sp.ID {
-		if pos = slices.IndexFunc(sq.Songs, func(s Song) bool { return s.ID == sp.ID }); pos < 0 {
+	if pos < 0 || pos >= len(songs) || songs[pos].ID != sp.ID {
+		if pos = slices.IndexFunc(songs, func(s Song) bool { return s.ID == sp.ID }); pos < 0 {
 			pos, at = 0, 0
 		}
 	}
 	newPos := -1
-	for i, s := range sq.Songs {
+	for i, s := range songs {
 		if s.Path != "" {
 			p, ok := inside(s.Path, root)
 			if !ok {

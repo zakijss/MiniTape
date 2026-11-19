@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -144,13 +145,31 @@ type queuePlayer struct {
 	stillPlayer
 	q   []Song
 	ops []string
+	// accept makes Move move the song, as the player does when the queue
+	// is as the screen saw it; else it refuses
+	accept bool
+	// calls, if set, gets a channel for each read of the queue, which
+	// answers it
+	calls chan chan []Song
 }
 
-func (p *queuePlayer) Queue() ([]Song, int, error) { return p.q, p.st.Pos, nil }
-func (p *queuePlayer) Jump(i int, id string)       { p.ops = append(p.ops, fmt.Sprint("jump ", i, id)) }
-func (p *queuePlayer) Remove(i int, id string)     { p.ops = append(p.ops, fmt.Sprint("remove ", i, id)) }
+func (p *queuePlayer) Queue() ([]Song, int, error) {
+	if p.calls != nil {
+		c := make(chan []Song)
+		p.calls <- c
+		return <-c, 0, nil
+	}
+	return p.q, p.st.Pos, nil
+}
+func (p *queuePlayer) Jump(i int, id string)   { p.ops = append(p.ops, fmt.Sprint("jump ", i, id)) }
+func (p *queuePlayer) Remove(i int, id string) { p.ops = append(p.ops, fmt.Sprint("remove ", i, id)) }
 func (p *queuePlayer) Move(i, d int, id string) {
 	p.ops = append(p.ops, fmt.Sprint("move ", i, d, id))
+	if p.accept {
+		p.q = slices.Clone(p.q)
+		p.q[i], p.q[i+d] = p.q[i+d], p.q[i]
+		p.st.Queue++
+	}
 }
 
 // Down on Now Playing lists the queue on the current song; X, L2/R2 and A
@@ -158,7 +177,7 @@ func (p *queuePlayer) Move(i, d int, id string) {
 func TestQueueView(t *testing.T) {
 	a := testApp(t, "http://127.0.0.1:1")
 	q := []Song{{ID: "a", Title: "A", Duration: 60}, {ID: "b", Title: "B"}, {ID: "c", Title: "C"}}
-	pl := &queuePlayer{stillPlayer{NowPlaying{Song: q[1], Has: true, Playing: true, Pos: 1, Queue: 3}}, q, nil}
+	pl := &queuePlayer{stillPlayer: stillPlayer{NowPlaying{Song: q[1], Has: true, Playing: true, Pos: 1, Queue: 3}}, q: q}
 	a.player = pl
 	a.stack = []*view{{title: "MiniTape"}}
 	a.np = true
@@ -171,16 +190,54 @@ func TestQueueView(t *testing.T) {
 	if len(v.list.Items) != 3 || v.list.Sel != 1 || v.list.Items[1].Detail != "playing" || v.list.Items[0].Detail != "1:00" {
 		t.Fatalf("rows: sel %d %+v", v.list.Sel, v.list.Items)
 	}
+	// the player refuses the move: the selection stays
 	for _, b := range []ui.Button{ui.X, ui.R2, ui.A} {
 		a.handle(ui.Event{Button: b, Pressed: true})
 	}
-	if got := strings.Join(pl.ops, ","); got != "remove 1b,move 1 1b,jump 2c" || !a.np || len(a.stack) != 1 {
+	if got := strings.Join(pl.ops, ","); got != "remove 1b,move 1 1b,jump 1b" || !a.np || len(a.stack) != 1 {
 		t.Fatalf("ops %q, np %v, %d views", got, a.np, len(a.stack))
 	}
+	// it moves the song: the selection follows it once the queue is read
+	pl.accept = true
 	a.handle(ui.Event{Button: ui.Down, Pressed: true})
+	v = a.top()
+	a.waitLoaded(t, v)
+	a.handle(ui.Event{Button: ui.R2, Pressed: true})
+	deadline := time.After(3 * time.Second)
+	for v.list.Sel != 2 {
+		a.draw()
+		select {
+		case apply := <-a.done:
+			apply()
+		case <-deadline:
+			t.Fatalf("the selection didn't follow the song: sel %d", v.list.Sel)
+		}
+	}
+	if v.list.Items[2].Label != "B" {
+		t.Fatalf("selected %q", v.list.Items[2].Label)
+	}
 	a.handle(ui.Event{Button: ui.B, Pressed: true})
 	if !a.np || len(a.stack) != 1 {
 		t.Fatal("B didn't go back to Now Playing")
+	}
+}
+
+// A read of the queue that answers after a newer one is dropped.
+func TestQueueViewDropsOldReads(t *testing.T) {
+	a := testApp(t, "http://127.0.0.1:1")
+	pl := &queuePlayer{calls: make(chan chan []Song)}
+	a.player = pl
+	v := a.queueView()
+	v.update(NowPlaying{Queue: 1})
+	older := <-pl.calls
+	v.update(NowPlaying{Queue: 2})
+	newer := <-pl.calls
+	newer <- []Song{{ID: "n", Title: "New"}}
+	(<-a.done)()
+	older <- []Song{{ID: "o", Title: "Old"}, {ID: "p", Title: "Older"}}
+	(<-a.done)()
+	if len(v.list.Items) != 1 || v.list.Items[0].Label != "New" {
+		t.Fatalf("rows %+v", v.list.Items)
 	}
 }
 
@@ -189,8 +246,16 @@ func TestQueueView(t *testing.T) {
 // folder.
 func TestServerPathIsNotLocal(t *testing.T) {
 	var s Song
-	if err := json.Unmarshal([]byte(`{"id":"s1","path":"-i /etc/passwd","title":"x"}`), &s); err != nil || s.Path != "" {
-		t.Fatalf("decoded %+v, %v", s, err)
+	for _, j := range []string{`{"id":"s1","path":"-i /etc/passwd","title":"x"}`, `{"id":"s1","localPath":"/etc/passwd"}`} {
+		if err := json.Unmarshal([]byte(j), &s); err != nil || s.Path != "" {
+			t.Fatalf("decoded %+v, %v", s, err)
+		}
+	}
+	// MiniTape's own JSON keeps it
+	b, _ := json.Marshal(ownSongs([]Song{{ID: "/m/a.mp3", Path: "/m/a.mp3"}, {ID: "s1"}}))
+	var back []ownSong
+	if err := json.Unmarshal(b, &back); err != nil || ids(fromOwn(back)) != "/m/a.mp3 s1" || fromOwn(back)[0].Path != "/m/a.mp3" || back[1].Path != "" {
+		t.Fatalf("own JSON %s: %+v, %v", b, back, err)
 	}
 	for _, c := range []struct {
 		path string

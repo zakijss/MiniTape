@@ -94,17 +94,27 @@ func TestPlayerStopsAfterSong(t *testing.T) {
 	chrtPath = ""
 	defer func() { chrtPath = old }()
 	p := NewPlayer(func(s Song, at int) string { return "x" }, nil)
+	p.minPlayed = 50 * time.Millisecond // the fake songs play 0.2 s
 	defer p.Stop()
-	p.Play([]Song{{ID: "a"}, {ID: "b"}}, 0)
-	p.StopAfterSong(true)
-	if !p.State().SleepEnd {
-		t.Fatal("SleepEnd not reported")
+	// with each repeat mode: it stops all the same
+	for _, rep := range []int{repeatOff, repeatOne, repeatAll} {
+		p.SetRepeat(rep)
+		p.Play([]Song{{ID: "a"}, {ID: "b"}}, 0)
+		p.StopAfterSong(true)
+		if !p.State().SleepEnd {
+			t.Fatal("SleepEnd not reported")
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for p.State().Playing && time.Now().Before(deadline) {
+			time.Sleep(20 * time.Millisecond)
+		}
+		time.Sleep(300 * time.Millisecond) // nothing starts after it
+		st := p.State()
+		if st.Playing || st.Song.ID != "b" || st.SleepEnd {
+			t.Fatalf("repeat %d, after the song: playing %v, song %s, sleepEnd %v", rep, st.Playing, st.Song.ID, st.SleepEnd)
+		}
 	}
-	time.Sleep(time.Second)
-	st := p.State()
-	if st.Playing || st.Song.ID != "b" || st.SleepEnd {
-		t.Fatalf("after the song: playing %v, song %s, sleepEnd %v", st.Playing, st.Song.ID, st.SleepEnd)
-	}
+	p.SetRepeat(repeatOff)
 
 	// Seeking past the end counts as the song ending.
 	p.Play([]Song{{ID: "a", Duration: 100}, {ID: "b"}}, 0)

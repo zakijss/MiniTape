@@ -1192,9 +1192,10 @@ func (a *app) coverAt(id string, px int) image.Image {
 	}
 	if !a.pending[k] {
 		a.pending[k] = true
+		root := a.cfg.musicDir()
 		go func() {
 			a.fetchSem <- struct{}{}
-			img, err := a.coverImage(id, px)
+			img, err := a.coverImage(id, root, px)
 			<-a.fetchSem
 			a.coverMu.Lock()
 			delete(a.pending, k)
@@ -1689,8 +1690,9 @@ func (a *app) lyricsFor(s Song, fetch bool) *songLyrics {
 		a.lyr[s.ID] = l
 	}
 	l.loading, l.err = true, ""
+	root := a.cfg.musicDir()
 	go func() {
-		lines, synced, err := a.songLyrics(s)
+		lines, synced, err := a.songLyrics(s, root)
 		a.lyrMu.Lock()
 		l.loading, l.lines, l.synced = false, lines, synced
 		if err != nil {

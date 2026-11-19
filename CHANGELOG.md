@@ -29,6 +29,11 @@ All notable changes are listed here. The format follows
 - In Search and Starred, song lengths and the playing mark showed on the wrong rows when albums were listed above the songs, and artists lost their icon.
 - After switching servers, covers, lyrics and stars kept in memory from the old server are dropped, so another server's albums can't show them.
 - Lyrics no longer crash the screen for a song the server lists without an id.
+- A server can no longer make MiniTape read files on the card: songs from a server never count as files on the card, and covers and lyrics are read only from ordinary files inside the music folder, a cover at most 8 MB.
+- Playing a folder queues at most 500 songs around the one chosen, instead of every song below it.
+- A song that ends as soon as it starts (an empty or unreadable file) stops with an error instead of starting again and again with repeat on, each time counted as a play.
+- A file with thousands of empty WAV chunks or MP4 boxes is read only so far, instead of keeping the card busy.
+- The queue list ignores an older reading of the queue that arrives late, and the selection moves with a song only once the player has moved it.
 
 ## [1.1.1] - 2026-11-12
 
