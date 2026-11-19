@@ -6,6 +6,30 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-19
+
+### Added
+
+- Music on the SD card: **On this card** on the first screen plays the songs in `Media/Music` (or `music_dir` in `settings.json`) by folder, artist or album, through the same player, with the sleep timer, background playback and the menu ticker. It works offline and with no server: the first start can skip the server. MP3, FLAC, Ogg, Opus, M4A, AAC and WAV.
+- Tags, lengths and track numbers are read from the files (ID3, Vorbis comments, MP4), and covers from `cover.jpg`, `folder.jpg` or `front.jpg` in the folder. The index is kept on the card; Y reads the folder again.
+- Lyrics for songs on the card, from a `.lrc` file next to the song or from its tags. Songs from the card go to Last.fm and ListenBrainz when they are tagged with an artist.
+- Repeat: L2 on Now Playing goes through repeat all, repeat one and off.
+- The queue, the song playing and the time in it are saved, and the next start opens on them, paused: A plays on. The place is written every 10 seconds while music plays, so a device that loses power picks up close to where it was. Server songs are dropped when another server (or none) is set up, and songs on the card when their files are gone.
+- Down on Now Playing lists the whole queue with the current song marked. A plays a song, X takes one out, L2 and R2 move one up or down.
+- Left and Right in Artists, and in Albums and Folders on the card, go to the first entry of the previous or next letter. Server artists follow the server's own letters.
+- Covers inside the files on the card (ID3, FLAC and Ogg pictures, MP4 covr) when the folder has no cover picture. They are read when first shown, up to 8 MB each, and kept scaled in the cache.
+
+### Changed
+
+- A held Up or Down stops at the first or last row of a list instead of going round to the other end.
+
+### Fixed
+
+- A song played again (after Stop, or a one-song queue) is sent to Last.fm, ListenBrainz and the server as a new play. Before, it counted only once.
+- In Search and Starred, song lengths and the playing mark showed on the wrong rows when albums were listed above the songs, and artists lost their icon.
+- After switching servers, covers, lyrics and stars kept in memory from the old server are dropped, so another server's albums can't show them.
+- Lyrics no longer crash the screen for a song the server lists without an id.
+
 ## [1.1.1] - 2026-11-12
 
 ### Changed
@@ -62,7 +86,8 @@ All notable changes are listed here. The format follows
 
 - The first release: browsing, background playback with an on-screen ticker, lyrics, pixel-art covers, Last.fm and ListenBrainz scrobbling, songs downloaded ahead to the card with bit rate steps, and real-time audio scheduling. Settings for the streaming quality, the room for downloaded songs (and clearing them), the menu ticker, background playback and cover art.
 
-[Unreleased]: https://github.com/zakijss/MiniTape/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/zakijss/MiniTape/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/zakijss/MiniTape/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/zakijss/MiniTape/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/zakijss/MiniTape/compare/v1.0.3...v1.1.0
 [1.0.3]: https://github.com/zakijss/MiniTape/compare/v1.0.2...v1.0.3

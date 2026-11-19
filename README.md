@@ -6,10 +6,13 @@
 
 # MiniTape
 
-A music player for [Navidrome](https://www.navidrome.org) and other Subsonic servers, on a Miyoo Mini Plus. The music keeps playing in the Onion menu and in other apps, and pauses for games. Part of [MiniDeck](https://github.com/zakijss/MiniDeck).
+A music player for [Navidrome](https://www.navidrome.org) and other Subsonic servers, and for the music on the SD card, on a Miyoo Mini Plus. The music keeps playing in the Onion menu and in other apps, and pauses for games. Part of [MiniDeck](https://github.com/zakijss/MiniDeck).
 
 - Recently added, random, most played and starred albums, artists, playlists, search, and **Shuffle everything** in one press.
 - Plays in the background, with the song scrolling across the top of the screen; **Settings > Background playback** turns that off.
+- **On this card** plays the music in `Media/Music` on the SD card by folder, artist or album, with no server and no Wi-Fi.
+- The queue, the song and the time in it are kept when MiniTape or the device turns off; the next start opens on them, paused.
+- A list of the queue to jump around in, take songs out of or reorder, and a jump to the next letter in long lists.
 - Synced lyrics, covers drawn in the interface's pixel style, and scrobbling to Last.fm and ListenBrainz.
 - Songs download to the card ahead of the music, the next one while the last plays, so they start at once and Wi-Fi drops aren't heard; the bit rate steps down when the link can't keep up. Up to 500 MB of songs (by default) stay on the card and play again offline.
 - **Settings** also sets the streaming quality (96 to 320 kbit/s), how much of the card downloaded songs may use (100 MB to 1 GB) and clears them, and turns the Onion menu ticker on or off.
@@ -20,11 +23,19 @@ A music player for [Navidrome](https://www.navidrome.org) and other Subsonic ser
 
 ## Using it
 
-The first start asks for your server, user name and password. On the now-playing screen **A** pauses, **L1**/**R1** skip, **Left**/**Right** go back or forward 10 seconds, **R2** stars or unstars the song, **SELECT** sets the sleep timer, **Y** shows the lyrics, **X** stops and **B** goes back. **SELECT** opens the now-playing screen from anywhere else in the app.
+The first start asks for your server, user name and password, or to play only the music on the card (a server can be added later in **Settings > Music server**). On the now-playing screen **A** pauses, **L1**/**R1** skip, **Left**/**Right** go back or forward 10 seconds, **R2** stars or unstars the song, **L2** switches repeat (all, one, off), **SELECT** sets the sleep timer, **Y** shows the lyrics, **Down** lists the queue, **X** stops and **B** goes back. **SELECT** opens the now-playing screen from anywhere else in the app.
+
+In the queue the current song is marked. **A** plays the selected song, **X** takes it out of the queue (not the current one), **L2**/**R2** move it up and down, and **B** goes back to the now-playing screen.
+
+When MiniTape starts with a queue saved from last time, it opens on the now-playing screen, paused where the music stopped; **A** plays on. Songs from a server that is no longer set up, and songs whose files have left the card, are dropped from it.
 
 The sleep timer pauses the music after 15 minutes to 90 minutes, or at the end of the song, and keeps counting with MiniTape closed; the time left shows at the top of the now-playing screen. The Miyoo can't tell when headphones are plugged in or out (the jack switches the speaker off by itself), so MiniTape doesn't pause on unplugging.
 
-In the lists, **Y** refreshes from the server (lists open at once from the copy on the card), **X** shuffles an album or playlist, and **L2**/**R2** jump to the top and the bottom. **Search** on the first screen finds artists, albums and songs.
+In the lists, **Y** refreshes from the server (lists open at once from the copy on the card), **X** shuffles an album or playlist, and **L2**/**R2** jump to the top and the bottom. In Artists, and in Albums and Folders on the card, **Left**/**Right** go to the first entry of the previous or next letter (the server's artists by its own letters, so "The Beatles" may be under B); elsewhere they move six rows, as **L1**/**R1** do. **Search** on the first screen finds artists, albums and songs.
+
+### Music on the card
+
+Copy music to `Media/Music` on the SD card, in any folders (set `music_dir` in `App/MiniTape/settings.json` for another folder). MiniTape plays MP3, FLAC, Ogg, Opus, M4A, AAC and WAV files. **On this card > Folders** follows the folders; **Artists** and **Albums** come from the songs' tags. The first visit reads every file's tags, which takes a while for a large collection; after that the lists open at once, and **Y** reads the folder again for new songs. A `cover.jpg`, `folder.jpg` or `front.jpg` in a folder is its cover; without one, the picture inside the song's file (up to 8 MB) is used. Lyrics come from a `.lrc` file with the song's name next to it, or from its tags. Songs on the card can't be starred, and go to Last.fm and ListenBrainz only when tagged with an artist.
 
 MiniTape asks the server for MP3 (192 kbit/s by default; **Settings > Streaming quality**, or `format` and `max_bitrate` in `App/MiniTape/settings.json`), since the device's FFmpeg is old, so Navidrome needs ffmpeg for transcoding. Servers on your private network (Tailscale, Headscale, WireGuard or NetBird) work through [MiniScale](https://github.com/zakijss/MiniScale).
 
@@ -36,7 +47,7 @@ MiniTape asks the server for MP3 (192 kbit/s by default; **Settings > Streaming 
 
 ## Requirements
 
-A Miyoo Mini Plus on Onion OS 4.4, with Wi-Fi. A Navidrome or other Subsonic server that can transcode to MP3. Other devices and firmwares aren't supported.
+A Miyoo Mini Plus on Onion OS 4.4. For a server: Wi-Fi, and a Navidrome or other Subsonic server that can transcode to MP3. Other devices and firmwares aren't supported.
 
 ## Building
 

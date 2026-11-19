@@ -2,5 +2,5 @@
 	"label":	"MiniTape",
 	"icon":	"/mnt/SDCARD/App/MiniTape/icon.png",
 	"launch":	"launch.sh",
-	"description":	"Music from your Subsonic server"
+	"description":	"Music from your Subsonic server or the SD card"
 }

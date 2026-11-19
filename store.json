@@ -1,7 +1,7 @@
 {
   "name": "MiniTape",
   "folder": "MiniTape",
-  "desc": "Music from Navidrome or any Subsonic server",
+  "desc": "Music from Navidrome, any Subsonic server or the SD card",
   "repo": "zakijss/MiniTape",
   "license": "MIT",
   "version": "__VERSION__",
