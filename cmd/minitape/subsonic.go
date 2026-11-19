@@ -91,6 +91,9 @@ type Song struct {
 	Year         int    `json:"year,omitempty"`
 	Genre        string `json:"genre,omitempty"`
 	Starred      string `json:"starred,omitempty"` // when it was starred; empty if not
+	// Path is the file on the card, for a song played from there (its ID
+	// is the path too); empty for the server's songs.
+	Path string `json:"path,omitempty"`
 }
 
 // Album is an album; Song is filled in only by Subsonic.Album.
@@ -436,31 +439,42 @@ func (c *Subsonic) CoverArt(id string, size int) (image.Image, error) {
 		return nil, errors.New("no cover")
 	}
 	extra := url.Values{"id": {id}, "size": {fmt.Sprint(size)}}
-	key := c.cacheKey("getCoverArt", extra) + "|scaled"
-	if c.Cache != nil {
-		if b, ok := c.Cache.Get(key); ok {
+	return cachedCover(c.Cache, c.cacheKey("getCoverArt", extra)+"|scaled", size, func() ([]byte, error) {
+		resp, err := c.HTTP.Get(c.URL("getCoverArt", extra))
+		if err != nil {
+			return nil, cleanErr(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+		}
+		b, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		if err != nil {
+			return nil, cleanErr(err)
+		}
+		return b, nil
+	})
+}
+
+// cachedCover returns the cover kept in c under key at size x size, or
+// decodes the one get returns and keeps it (as PNG, lossless).
+func cachedCover(c *cache.Disk, key string, size int, get func() ([]byte, error)) (image.Image, error) {
+	if c != nil {
+		if b, ok := c.Get(key); ok {
 			if img, err := png.Decode(bytes.NewReader(b)); err == nil && img.Bounds().Dx() == size {
 				return img, nil
 			}
 		}
 	}
-	resp, err := c.HTTP.Get(c.URL("getCoverArt", extra))
+	b, err := get()
 	if err != nil {
-		return nil, cleanErr(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if err != nil {
-		return nil, cleanErr(err)
+		return nil, err
 	}
 	img, err := decodeCover(b, size)
-	if err == nil && c.Cache != nil {
+	if err == nil && c != nil {
 		var buf bytes.Buffer
 		if png.Encode(&buf, img) == nil {
-			c.Cache.Put(key, buf.Bytes())
+			c.Put(key, buf.Bytes())
 		}
 	}
 	return img, err

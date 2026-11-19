@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -31,6 +32,11 @@ type Player struct {
 	// endOfSong, set by the sleep timer, stops at the end of this track
 	// instead of going on to the next.
 	endOfSong bool
+	repeat    int // repeatOff, repeatAll or repeatOne
+	// plays counts the tracks started from the beginning: a song played
+	// again is a new play to scrobble, though its place and id are the
+	// same.
+	plays int
 
 	// url gives the stream URL for a song, starting at a whole second.
 	url     func(s Song, at int) string
@@ -40,6 +46,14 @@ type Player struct {
 	// stream can be fetched ahead.
 	prefetch func(s Song)
 }
+
+// The repeat modes: off, the queue (it starts over after its last song)
+// and one (the song plays again).
+const (
+	repeatOff = iota
+	repeatAll
+	repeatOne
+)
 
 // NewPlayer makes a player that streams each song from urlFor(song,
 // seconds in). changed, if set, is called when a track ends by itself.
@@ -103,7 +117,17 @@ func (p *Player) startLocked(at time.Duration) {
 		return
 	}
 	sec := int(at.Seconds())
-	cmd := ffplayCommand(p.ffplay, "-nodisp", "-autoexit", "-loglevel", "quiet", p.url(p.queue[p.pos], sec))
+	song := p.queue[p.pos]
+	args := []string{"-nodisp", "-autoexit", "-loglevel", "quiet"}
+	if song.Path != "" { // a file on the card: ffplay seeks in it
+		if sec > 0 {
+			args = append(args, "-ss", strconv.Itoa(sec))
+		}
+		args = append(args, song.Path)
+	} else {
+		args = append(args, p.url(song, sec))
+	}
+	cmd := ffplayCommand(p.ffplay, args...)
 	cmd.Env = ffplayEnv()
 	if err := cmd.Start(); err != nil {
 		p.err = "Can't start ffplay: " + err.Error()
@@ -115,8 +139,11 @@ func (p *Player) startLocked(at time.Duration) {
 		syscall.Setpriority(syscall.PRIO_PROCESS, cmd.Process.Pid, -10)
 	}
 	p.err = ""
+	if at == 0 {
+		p.plays++
+	}
 	p.cmd, p.started, p.pausedD, p.offset = cmd, time.Now(), 0, time.Duration(sec)*time.Second
-	if p.prefetch != nil && p.pos+1 < len(p.queue) {
+	if p.prefetch != nil && p.pos+1 < len(p.queue) && p.queue[p.pos+1].Path == "" {
 		p.prefetch(p.queue[p.pos+1])
 	}
 	gen := p.gen
@@ -142,7 +169,8 @@ func (p *Player) startLocked(at time.Duration) {
 }
 
 // songEndedLocked goes on after a track has finished (ffplay has
-// exited): to the next one, or nowhere at the end of the queue or when the
+// exited): to the next one, the same one again (repeat one), the first
+// (repeat all, at the end), or nowhere at the end of the queue or when the
 // sleep timer stops after this song (A later plays the next one).
 func (p *Player) songEndedLocked() {
 	switch {
@@ -151,8 +179,15 @@ func (p *Player) songEndedLocked() {
 		if p.pos+1 < len(p.queue) {
 			p.pos++
 		}
+	case p.repeat == repeatOne:
+		p.startLocked(0)
+		return
 	case p.pos+1 < len(p.queue):
 		p.pos++
+		p.startLocked(0)
+		return
+	case p.repeat == repeatAll && len(p.queue) > 0:
+		p.pos = 0
 		p.startLocked(0)
 		return
 	}
@@ -185,14 +220,26 @@ func (p *Player) Toggle() {
 	}
 }
 
-// Next skips to the next track, if there is one.
+// Next skips to the next track, if there is one; with repeat all, from
+// the last to the first.
 func (p *Player) Next() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.pos+1 < len(p.queue) {
+	switch {
+	case p.pos+1 < len(p.queue):
 		p.pos++
 		p.startLocked(0)
+	case p.repeat == repeatAll && len(p.queue) > 0:
+		p.pos = 0
+		p.startLocked(0)
 	}
+}
+
+// SetRepeat sets the repeat mode (repeatOff, repeatAll or repeatOne).
+func (p *Player) SetRepeat(mode int) {
+	p.mu.Lock()
+	p.repeat = min(max(mode, repeatOff), repeatOne)
+	p.mu.Unlock()
 }
 
 // Prev restarts the track, or goes to the previous one in the first 5 s.
@@ -222,7 +269,15 @@ func (p *Player) Seek(d int) {
 		p.songEndedLocked()
 		return
 	}
+	p.restartLocked(at)
+}
+
+// restartLocked starts the track again at at, as the same play: back to
+// 0:00 by seeking, or after a game, isn't a new one to scrobble.
+func (p *Player) restartLocked(at time.Duration) {
+	plays := p.plays
 	p.startLocked(at)
+	p.plays = plays
 }
 
 // StopAfterSong sets (or clears) stopping at the end of the current track.
@@ -277,7 +332,7 @@ func (p *Player) Resume() {
 		p.paused = false
 		return
 	}
-	p.startLocked(p.offset)
+	p.restartLocked(p.offset)
 }
 
 // IdleFor reports how long nothing has been playing (0 while playing).
@@ -309,6 +364,10 @@ type NowPlaying struct {
 	// at the end of this song
 	SleepLeft int  `json:"sleepLeft,omitempty"`
 	SleepEnd  bool `json:"sleepEnd,omitempty"`
+	Repeat    int  `json:"repeat,omitempty"`
+	// Plays counts the tracks started from the beginning (see
+	// Player.plays).
+	Plays int `json:"plays"`
 }
 
 // State returns the player's state, with up to three songs coming next.
@@ -316,7 +375,7 @@ func (p *Player) State() NowPlaying {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	n := NowPlaying{Pos: p.pos, Len: len(p.queue), Err: p.err, Paused: p.paused,
-		Playing: p.cmd != nil, Suspended: p.suspended, SleepEnd: p.endOfSong}
+		Playing: p.cmd != nil, Suspended: p.suspended, SleepEnd: p.endOfSong, Repeat: p.repeat, Plays: p.plays}
 	if p.pos >= 0 && p.pos < len(p.queue) {
 		n.Song, n.Has = p.queue[p.pos], true
 		if p.pos+1 < len(p.queue) {

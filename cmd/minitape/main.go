@@ -53,6 +53,20 @@ type Settings struct {
 	ServerScrobble   *bool  `json:"scrobble_server,omitempty"`
 	ListenBrainzUser string `json:"listenbrainz_user,omitempty"`
 	LastFMUser       string `json:"lastfm_user,omitempty"`
+	// MusicDir is the folder of music on the card (default Onion's
+	// Media/Music).
+	MusicDir string `json:"music_dir,omitempty"`
+	// LocalOnly: the first start was told to play only the card's music,
+	// so it doesn't ask for a server again.
+	LocalOnly bool `json:"local_only,omitempty"`
+}
+
+// musicDir is the folder of music on the card.
+func (s Settings) musicDir() string {
+	if s.MusicDir == "" {
+		return defaultMusicDir
+	}
+	return filepath.Clean(s.MusicDir)
 }
 
 // pixelCovers reports whether covers are drawn in the pixel style.
@@ -154,6 +168,7 @@ type playerCtl interface {
 	Stop()
 	Seek(d int)    // d seconds forward, or back when negative
 	Sleep(min int) // sleep timer: minutes, -1 for the end of the song, 0 off
+	Repeat(mode int)
 	State() NowPlaying
 }
 
@@ -220,6 +235,30 @@ type app struct {
 	// player holds still has the song as it was listed.
 	starMu sync.Mutex
 	stars  map[string]bool
+
+	lib    *localLib // the music on the card
+	server bool      // a server is set up
+}
+
+// forgetServer drops what was kept in memory from the last server
+// (covers, lyrics and stars by id), after the server is changed: another
+// server can use the same ids for other albums and songs.
+func (a *app) forgetServer() {
+	a.coverMu.Lock()
+	clear(a.covers)
+	clear(a.failed)
+	clear(a.backdrops)
+	a.coverOrder = nil
+	a.coverMu.Unlock()
+	a.pixelMu.Lock()
+	a.pixels, a.pixelBytes = nil, 0
+	a.pixelMu.Unlock()
+	a.lyrMu.Lock()
+	clear(a.lyr)
+	a.lyrMu.Unlock()
+	a.starMu.Lock()
+	clear(a.stars)
+	a.starMu.Unlock()
 }
 
 // isStarred reports whether s is starred, counting R2 presses on Now Playing.
@@ -235,7 +274,7 @@ func (a *app) isStarred(s Song) bool {
 // toggleStar stars or unstars s on the server, showing the new state at
 // once and going back to the old one if the server says no.
 func (a *app) toggleStar(s Song) {
-	if s.ID == "" {
+	if s.ID == "" || s.Path != "" { // songs on the card can't be starred
 		return
 	}
 	on := !a.isStarred(s)
@@ -296,16 +335,15 @@ func main() {
 		log.Printf("secrets: %v", err)
 	}
 	ui.TraceMark("secrets read")
-	if cfg.URL == "" || cfg.User == "" || sec[cfg.Secret] == "" {
-		if !setup(scr, input, dir, &cfg, sec, true) {
-			return
-		}
+	if !hasServer(cfg, sec) && !cfg.LocalOnly && !firstRun(scr, input, dir, &cfg, sec) {
+		return
 	}
 
 	redraw := make(chan struct{}, 1)
 	a := &app{scr: scr, input: input, covers: map[coverKey]image.Image{}, pending: map[coverKey]bool{}, failed: map[coverKey]time.Time{},
 		backdrops: map[string]*image.RGBA{}, fetchSem: make(chan struct{}, 3),
-		cfg: &cfg, lyr: map[string]*songLyrics{}, done: make(chan func(), 8)}
+		cfg: &cfg, lyr: map[string]*songLyrics{}, done: make(chan func(), 8),
+		lib: &localLib{file: filepath.Join(dir, localIndexFile)}, server: hasServer(cfg, sec)}
 	a.poke = func() {
 		select {
 		case redraw <- struct{}{}:
@@ -369,7 +407,9 @@ func main() {
 					a.player.Stop()
 					rp.Reload()
 					a.sub.SetLogin(cfg.URL, cfg.User, sec[cfg.Secret])
-					a.stack = a.stack[:1]
+					a.forgetServer()
+					a.server = true
+					a.stack = []*view{a.home()}
 				}
 			case "Scrobbling":
 				scrobbling.run()
@@ -638,8 +678,13 @@ func (a *app) home() *view {
 		{Label: "Search", Icon: "eye", Chevron: true, Sub: "Artists, albums and songs", Value: func() { a.search("") }},
 		{Label: "Artists", Icon: "person", Chevron: true, Sub: "Everyone, A to Z", Value: func() { a.push(a.artists()) }},
 		{Label: "Playlists", Icon: "list", Chevron: true, Sub: "Your playlists", Value: func() { a.push(a.playlists()) }},
-		{Label: "Settings", Icon: "gear", Sub: "Server, scrobbling and appearance", Chevron: true, Value: func() { a.settings() }},
+		{Label: "On this card", Icon: "note", Chevron: true, Sub: "Music in " + strings.TrimPrefix(a.cfg.musicDir(), "/mnt/SDCARD/"),
+			Value: func() { a.push(a.localHome()) }},
 	}
+	if !a.server { // only the card's music
+		items = a.localItems()
+	}
+	items = append(items, ui.Item{Label: "Settings", Icon: "gear", Sub: "Server, scrobbling and appearance", Chevron: true, Value: func() { a.settings() }})
 	return &view{title: "MiniTape", list: ui.List{Items: items},
 		open: func(it *ui.Item) { it.Value.(func())() }}
 }
@@ -662,13 +707,7 @@ func (a *app) albumItems(al []Album) []ui.Item {
 
 func (a *app) openAlbum(it *ui.Item) {
 	al := it.Value.(Album)
-	v := a.songList(al.Name, true, func() ([]Song, error) {
-		full, err := a.sub.Album(al.ID)
-		if err != nil {
-			return nil, err
-		}
-		return full.Song, nil
-	})
+	v := a.songList(al.Name, true, func() ([]Song, error) { return a.albumSongs(al) })
 	v.art = al.CoverArt
 	if v.art == "" {
 		v.art = al.ID
@@ -682,11 +721,11 @@ func (a *app) openAlbum(it *ui.Item) {
 // playAlbum starts an album straight from a list (START), no extra screen.
 func (a *app) playAlbum(al Album) {
 	go func() {
-		full, err := a.sub.Album(al.ID)
-		if err != nil || len(full.Song) == 0 {
+		songs, err := a.albumSongs(al)
+		if err != nil || len(songs) == 0 {
 			return
 		}
-		a.player.Play(full.Song, 0)
+		a.player.Play(songs, 0)
 		a.poke()
 	}()
 	a.np = true
@@ -746,12 +785,12 @@ func (a *app) openArtist(ar Artist) {
 		}
 	}
 	a.push(a.load(av, func() ([]ui.Item, func(), error) {
-		full, err := a.sub.Artist(ar.ID)
+		albums, err := a.artistAlbums(ar)
 		if err != nil {
 			return nil, nil, err
 		}
-		sub := fmt.Sprintf("%d albums", len(full.Album))
-		return a.albumItems(full.Album), func() { av.sub = sub }, nil
+		sub := fmt.Sprintf("%d albums", len(albums))
+		return a.albumItems(albums), func() { av.sub = sub }, nil
 	}))
 }
 
@@ -888,15 +927,7 @@ func (a *app) songList(title string, numbered bool, fetch func() ([]Song, error)
 			v.open(it)
 		}
 	}
-	v.shuffle = func() {
-		if len(v.songs) == 0 {
-			return
-		}
-		q := append([]Song(nil), v.songs...)
-		rand.Shuffle(len(q), func(i, j int) { q[i], q[j] = q[j], q[i] })
-		a.player.Play(q, 0)
-		a.np = true
-	}
+	v.shuffle = func() { a.playShuffled(v.songs) }
 	return a.load(v, func() ([]ui.Item, func(), error) {
 		s, err := fetch()
 		items := make([]ui.Item, len(s))
@@ -927,13 +958,20 @@ func (a *app) songList(title string, numbered bool, fetch func() ([]Song, error)
 }
 
 func (a *app) shuffleAll() {
-	v := &view{title: "Shuffle everything", loading: true}
+	a.shuffleFrom("Shuffle everything", func() ([]Song, error) { return a.sub.RandomSongs(200) },
+		"Your server has no songs yet. Add some music to it.")
+}
+
+// shuffleFrom plays the songs fetch gets in a random order, showing a
+// loading screen titled title meanwhile, and empty if there are none.
+func (a *app) shuffleFrom(title string, fetch func() ([]Song, error), empty string) {
+	v := &view{title: title, loading: true}
 	a.push(v)
 	go func() {
-		s, err := a.sub.RandomSongs(200)
+		s, err := fetch()
 		if err == nil && len(s) > 0 {
 			rand.Shuffle(len(s), func(i, j int) { s[i], s[j] = s[j], s[i] })
-			a.player.Play(s, 0)
+			a.player.Play(s[:min(len(s), maxLocalQueue)], 0)
 		}
 		a.done <- func() {
 			v.loading = false
@@ -941,7 +979,7 @@ func (a *app) shuffleAll() {
 			case err != nil:
 				v.err = err.Error()
 			case len(s) == 0:
-				v.err = "Your server has no songs yet. Add some music to it."
+				v.err = empty
 			default:
 				v.toNP = true // draw pops this view
 			}
@@ -978,6 +1016,8 @@ func (a *app) handle(ev ui.Event) {
 			a.np = false
 		case ui.Select:
 			a.sleepTimer()
+		case ui.L2:
+			a.player.Repeat((a.player.State().Repeat + 1) % 3)
 		case ui.X:
 			a.player.Stop()
 			a.np = false
@@ -1052,6 +1092,17 @@ func (a *app) sleepTimer() {
 	}
 }
 
+// repeatText is the repeat mode as the header shows it.
+func repeatText(st NowPlaying) string {
+	switch st.Repeat {
+	case repeatAll:
+		return "REPEAT ALL"
+	case repeatOne:
+		return "REPEAT ONE"
+	}
+	return ""
+}
+
 // sleepText is the sleep timer as the header shows it: "SLEEP 29 MIN".
 func sleepText(st NowPlaying) string {
 	switch {
@@ -1108,7 +1159,7 @@ func (a *app) coverAt(id string, px int) image.Image {
 		a.pending[k] = true
 		go func() {
 			a.fetchSem <- struct{}{}
-			img, err := a.sub.CoverArt(id, px)
+			img, err := a.coverImage(id, px)
 			<-a.fetchSem
 			a.coverMu.Lock()
 			delete(a.pending, k)
@@ -1283,14 +1334,15 @@ func (a *app) draw() {
 		a.drawArtPanel(v, top, bottom)
 		area.Min.X = 238
 	}
-	if v.songs != nil {
-		// mark the playing track
-		for i := range v.list.Items {
-			v.list.Items[i].Icon = ""
-			if st.Has && st.Playing && i < len(v.songs) && v.songs[i].ID == st.Song.ID {
-				v.list.Items[i].Detail = "playing"
-			} else if i < len(v.songs) {
-				v.list.Items[i].Detail = fmtDur(v.songs[i].Duration)
+	// mark the playing track: song rows hold their index in v.songs (album
+	// and artist rows above them, in Search and Starred, don't)
+	for i := range v.list.Items {
+		it := &v.list.Items[i]
+		if k, ok := it.Value.(int); ok && k >= 0 && k < len(v.songs) {
+			if st.Has && st.Playing && v.songs[k].ID == st.Song.ID {
+				it.Detail = "playing"
+			} else {
+				it.Detail = fmtDur(v.songs[k].Duration)
 			}
 		}
 	}
@@ -1427,16 +1479,17 @@ func (a *app) drawNowPlaying() {
 		hx += ui.Measure(ui.Caps, pos) + 12
 	}
 	// R2 stars the song: the star, or how to give it one (the footer is
-	// full). The sleep timer takes the hint's place while it runs.
-	sleep := sleepText(st)
+	// full). Repeat (L2) and the sleep timer take the hint's place while
+	// they are on. Songs on the card can't be starred.
+	extra := strings.TrimSpace(repeatText(st) + "   " + sleepText(st))
 	if st.Has && a.isStarred(st.Song) {
 		s.Icon("star", hx, 12, 22, ui.Text)
 		hx += 34
-	} else if st.Has && sleep == "" {
+	} else if st.Has && extra == "" && st.Song.Path == "" {
 		s.Text(hx, 18, "R2 TO STAR", ui.Caps, ui.Faint)
 	}
-	if sleep != "" {
-		s.Text(hx, 18, sleep, ui.Caps, ui.Accent)
+	if extra != "" {
+		s.Text(hx, 18, ui.Fit(ui.Caps, extra, ui.W-hx-150), ui.Caps, ui.Accent)
 	}
 	if !st.Has {
 		s.Message("Nothing playing", "Pick an album or a playlist.", ui.Hint{Button: "B", Label: "Back"})
@@ -1479,7 +1532,11 @@ func (a *app) drawNowPlaying() {
 	if rate == 0 {
 		rate = a.cfg.bitRate()
 	}
-	if info := streamInfo(st.Song, a.cfg.Format, rate); info != "" && y+ui.LineHeight(ui.Caps) < 240 {
+	format := a.cfg.Format
+	if st.Song.Path != "" { // played from the file as it is
+		format, rate = "", 0
+	}
+	if info := streamInfo(st.Song, format, rate); info != "" && y+ui.LineHeight(ui.Caps) < 240 {
 		s.Text(x, y, ui.Fit(ui.Caps, info, w), ui.Caps, ui.Faint)
 	}
 
@@ -1590,7 +1647,7 @@ func (a *app) lyricsFor(s Song, fetch bool) *songLyrics {
 	}
 	l.loading, l.err = true, ""
 	go func() {
-		lines, synced, err := a.sub.Lyrics(s)
+		lines, synced, err := a.songLyrics(s)
 		a.lyrMu.Lock()
 		l.loading, l.lines, l.synced = false, lines, synced
 		if err != nil {
@@ -1646,6 +1703,9 @@ func (a *app) drawLyrics(st NowPlaying) {
 	hints := []ui.Hint{{Button: "A", Label: play}, {Button: "L1/R1", Label: "Skip"}}
 
 	l := a.lyricsFor(st.Song, true)
+	if l == nil { // a song without an id: nothing to ask for
+		l = &songLyrics{}
+	}
 	a.lyrMu.Lock()
 	loading, lines, synced, errText := l.loading, l.lines, l.synced, l.err
 	a.lyrMu.Unlock()
@@ -1662,7 +1722,11 @@ func (a *app) drawLyrics(st NowPlaying) {
 		s.TextCenter(ui.W/2, y, "Press Y twice to try again.", ui.Small, ui.Faint)
 	case len(lines) == 0:
 		s.TextCenter(ui.W/2, mid-40, "No lyrics for this song", ui.Heading, ui.Text)
-		for i, line := range ui.Wrap(ui.Small, "Your server reads them from the song's tags or from a .lrc file next to it.", 440) {
+		where := "Your server reads them from the song's tags or from a .lrc file next to it."
+		if st.Song.Path != "" {
+			where = "MiniTape reads them from a .lrc file with the song's name next to it, or from the song's tags."
+		}
+		for i, line := range ui.Wrap(ui.Small, where, 440) {
 			s.TextCenter(ui.W/2, mid-4+i*ui.LineHeight(ui.Small), line, ui.Small, ui.Muted)
 		}
 	default:

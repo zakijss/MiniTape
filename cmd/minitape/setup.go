@@ -44,6 +44,7 @@ func setup(scr *ui.Screen, input <-chan ui.Event, dir string, cfg *Settings, sec
 	}
 	f.Commit = func() error {
 		cfg.URL, cfg.User = tnet.NormalizeURL(server.Value, "4533"), strings.TrimSpace(user.Value)
+		cfg.LocalOnly = false
 		if cfg.Secret == "" {
 			cfg.Secret = "navidrome"
 		}
@@ -56,6 +57,36 @@ func setup(scr *ui.Screen, input <-chan ui.Event, dir string, cfg *Settings, sec
 		return saveSettings(dir, cfg)
 	}
 	return f.Run(scr, input)
+}
+
+// hasServer reports whether a server and its login are set up.
+func hasServer(cfg Settings, sec map[string]string) bool {
+	return cfg.URL != "" && cfg.User != "" && sec[cfg.Secret] != ""
+}
+
+// firstRun asks, on the first start, for a server or to play only the
+// music on the card. It reports false when B leaves MiniTape.
+func firstRun(scr *ui.Screen, input <-chan ui.Event, dir string, cfg *Settings, sec map[string]string) bool {
+	items := []ui.Item{
+		{Label: "Connect to a music server", Sub: "Navidrome, Subsonic, Gonic and others", Icon: "server", Chevron: true},
+		{Label: "Only music on this card", Sub: "From " + strings.TrimPrefix(cfg.musicDir(), "/mnt/SDCARD/") + ", no server", Icon: "note"},
+	}
+	for {
+		i, ok := scr.Choose(input, "Set up MiniTape", items)
+		if !ok {
+			return false
+		}
+		if i == 0 && setup(scr, input, dir, cfg, sec, true) {
+			return true
+		}
+		if i == 1 {
+			cfg.LocalOnly = true
+			if err := saveSettings(dir, cfg); err != nil {
+				scr.Notice(input, "Couldn't save", err.Error())
+			}
+			return true
+		}
+	}
 }
 
 // saveSettings writes settings.json.

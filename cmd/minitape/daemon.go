@@ -159,6 +159,11 @@ func runDaemon(dir string) {
 	mux.HandleFunc("/next", func(w http.ResponseWriter, r *http.Request) { pl.Next() })
 	mux.HandleFunc("/prev", func(w http.ResponseWriter, r *http.Request) { pl.Prev() })
 	mux.HandleFunc("/stop", func(w http.ResponseWriter, r *http.Request) { pl.Stop() })
+	// /repeat?mode=1: 0 off, 1 the queue, 2 the song
+	mux.HandleFunc("/repeat", func(w http.ResponseWriter, r *http.Request) {
+		m, _ := strconv.Atoi(r.URL.Query().Get("mode"))
+		pl.SetRepeat(m)
+	})
 	// /sleep?min=30 pauses in 30 minutes; min=-1 stops at the end of the
 	// song; min=0 turns the timer off.
 	mux.HandleFunc("/sleep", func(w http.ResponseWriter, r *http.Request) {
@@ -254,8 +259,9 @@ func runDaemon(dir string) {
 	// Scrobbling: "now playing" when a track starts, a play once half of it
 	// (or 4 minutes) has played, as Last.fm counts them. The listen keeps
 	// the time the song started, which is what Last.fm and ListenBrainz
-	// file it under.
-	scrobbled, counted := "", ""
+	// file it under. A play is told apart by the player's count of
+	// tracks started, so the same song played again counts again.
+	scrobbled, counted := -1, -1
 	var cur Listen
 	for {
 		select {
@@ -284,14 +290,21 @@ func runDaemon(dir string) {
 			toServer := cfg.serverScrobble()
 			cfgMu.Unlock()
 			if playing {
-				key := fmt.Sprintf("%d/%s", st.Pos, st.Song.ID)
+				// Songs from the card aren't the server's, and go to
+				// Last.fm and ListenBrainz only when tagged with an artist.
+				local := st.Song.Path != ""
+				toServer := toServer && !local
+				toServices := !local || st.Song.Artist != ""
+				key := st.Plays
 				if key != scrobbled {
 					scrobbled = key
 					cur = listenOf(st.Song, time.Now().Add(-st.Elapsed))
 					if toServer {
 						go sub.Scrobble(st.Song.ID, false)
 					}
-					sc.NowPlaying(cur)
+					if toServices {
+						sc.NowPlaying(cur)
+					}
 				}
 				half := time.Duration(st.Song.Duration) * time.Second / 2
 				if key != counted && st.Song.Duration > 30 && st.Elapsed >= min(half, 4*time.Minute) {
@@ -299,7 +312,9 @@ func runDaemon(dir string) {
 					if toServer {
 						go sub.Scrobble(st.Song.ID, true)
 					}
-					sc.Scrobble(cur)
+					if toServices {
+						sc.Scrobble(cur)
+					}
 				}
 			}
 			sc.Tick(playing)
@@ -476,6 +491,9 @@ func (r *remote) Next()      { r.post("/next", nil) }
 func (r *remote) Prev()      { r.post("/prev", nil) }
 func (r *remote) Stop()      { r.post("/stop", nil) }
 func (r *remote) Seek(d int) { r.post("/seek?d="+strconv.Itoa(d), nil) }
+
+// Repeat sets the repeat mode: 0 off, 1 the queue, 2 the song.
+func (r *remote) Repeat(mode int) { r.post("/repeat?mode="+strconv.Itoa(mode), nil) }
 
 // Sleep sets the sleep timer: minutes, -1 for the end of the song, 0 off.
 func (r *remote) Sleep(min int) { r.post("/sleep?min="+strconv.Itoa(min), nil) }
