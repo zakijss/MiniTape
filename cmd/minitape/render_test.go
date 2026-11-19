@@ -26,7 +26,13 @@ func (p *stillPlayer) Stop()                {}
 func (p *stillPlayer) Seek(d int)           {}
 func (p *stillPlayer) Sleep(min int)        {}
 func (p *stillPlayer) Repeat(mode int)      {}
-func (p *stillPlayer) State() NowPlaying    { return p.st }
+func (p *stillPlayer) Queue() ([]Song, int, error) {
+	return []Song{p.st.Song}, 0, nil
+}
+func (p *stillPlayer) Jump(i int, id string)    {}
+func (p *stillPlayer) Remove(i int, id string)  {}
+func (p *stillPlayer) Move(i, d int, id string) {}
+func (p *stillPlayer) State() NowPlaying        { return p.st }
 
 // testCover is a 1000x1000 JPEG with fine detail (thin rings, stripes and
 // a gradient), so blurred or blocky scaling shows in the screenshots.

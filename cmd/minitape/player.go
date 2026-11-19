@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"sync"
 	"syscall"
@@ -37,6 +38,9 @@ type Player struct {
 	// again is a new play to scrobble, though its place and id are the
 	// same.
 	plays int
+	// qver counts the changes to the queue (a new one, a song removed or
+	// moved), so the screen and the saved queue know to read it again.
+	qver int
 
 	// url gives the stream URL for a song, starting at a whole second.
 	url     func(s Song, at int) string
@@ -83,8 +87,79 @@ func (p *Player) Play(q []Song, i int) {
 	p.queue = append([]Song(nil), q...)
 	p.pos = i
 	p.suspended = false
+	p.qver++
 	p.startLocked(0)
 	p.mu.Unlock()
+}
+
+// Restore sets the queue saved at the last exit, paused at the place it
+// was in song pos: Toggle (A) plays on from there.
+func (p *Player) Restore(q []Song, pos int, at time.Duration, repeat int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(q) == 0 || pos < 0 || pos >= len(q) {
+		return
+	}
+	p.stopLocked()
+	p.queue, p.pos, p.offset, p.suspended = q, pos, max(0, at), false
+	p.repeat = min(max(repeat, repeatOff), repeatOne)
+	p.qver++
+}
+
+// Queue returns a copy of the queue and the place in it.
+func (p *Player) Queue() ([]Song, int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]Song(nil), p.queue...), p.pos
+}
+
+// at reports whether song i of the queue is the one with id: the screen
+// names a song by both, so a queue changed meanwhile isn't acted on.
+func (p *Player) at(i int, id string) bool {
+	return i >= 0 && i < len(p.queue) && p.queue[i].ID == id
+}
+
+// Jump plays song i of the queue from its start.
+func (p *Player) Jump(i int, id string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.at(i, id) {
+		p.pos, p.suspended = i, false
+		p.startLocked(0)
+	}
+}
+
+// Remove takes song i out of the queue; not the one playing.
+func (p *Player) Remove(i int, id string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.at(i, id) || i == p.pos {
+		return
+	}
+	p.queue = slices.Delete(p.queue, i, i+1)
+	if i < p.pos {
+		p.pos--
+	}
+	p.qver++
+}
+
+// Move swaps song i with the one d (-1 or 1) places away; the playing song
+// keeps playing, at its new place.
+func (p *Player) Move(i, d int, id string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	j := i + d
+	if !p.at(i, id) || j < 0 || j >= len(p.queue) || abs(d) != 1 {
+		return
+	}
+	p.queue[i], p.queue[j] = p.queue[j], p.queue[i]
+	switch p.pos {
+	case i:
+		p.pos = j
+	case j:
+		p.pos = i
+	}
+	p.qver++
 }
 
 func (p *Player) stopLocked() {
@@ -302,6 +377,7 @@ func (p *Player) Stop() {
 	p.mu.Lock()
 	p.stopLocked()
 	p.queue, p.pos, p.offset, p.suspended, p.endOfSong = nil, 0, 0, false, false
+	p.qver++
 	p.mu.Unlock()
 }
 
@@ -368,6 +444,8 @@ type NowPlaying struct {
 	// Plays counts the tracks started from the beginning (see
 	// Player.plays).
 	Plays int `json:"plays"`
+	// Queue changes when the queue does (see Player.qver).
+	Queue int `json:"queue"`
 }
 
 // State returns the player's state, with up to three songs coming next.
@@ -375,7 +453,7 @@ func (p *Player) State() NowPlaying {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	n := NowPlaying{Pos: p.pos, Len: len(p.queue), Err: p.err, Paused: p.paused,
-		Playing: p.cmd != nil, Suspended: p.suspended, SleepEnd: p.endOfSong, Repeat: p.repeat, Plays: p.plays}
+		Playing: p.cmd != nil, Suspended: p.suspended, SleepEnd: p.endOfSong, Repeat: p.repeat, Plays: p.plays, Queue: p.qver}
 	if p.pos >= 0 && p.pos < len(p.queue) {
 		n.Song, n.Has = p.queue[p.pos], true
 		if p.pos+1 < len(p.queue) {

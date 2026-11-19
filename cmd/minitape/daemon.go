@@ -91,6 +91,16 @@ func runDaemon(dir string) {
 	}
 	pl := NewPlayer(rl.URL, nil)
 	pl.prefetch = rl.Prefetch
+	// the queue as it was at the last exit, paused
+	pl.Restore(loadResume(dir, serverOf(cfg)))
+	res := &resumer{dir: dir, qver: pl.State().Queue}
+	saveResume := func() {
+		st := pl.State()
+		cfgMu.Lock()
+		server := serverOf(cfg)
+		cfgMu.Unlock()
+		res.save(pl, st, st.Playing && !st.Paused && !st.Suspended, server)
+	}
 
 	mux := http.NewServeMux()
 	var lastAsked atomic.Int64 // when the screen last asked for the state
@@ -159,6 +169,25 @@ func runDaemon(dir string) {
 	mux.HandleFunc("/next", func(w http.ResponseWriter, r *http.Request) { pl.Next() })
 	mux.HandleFunc("/prev", func(w http.ResponseWriter, r *http.Request) { pl.Prev() })
 	mux.HandleFunc("/stop", func(w http.ResponseWriter, r *http.Request) { pl.Stop() })
+	// the queue, for the screen's list of it, and changes to it
+	mux.HandleFunc("/queue", func(w http.ResponseWriter, r *http.Request) {
+		var q queueReply
+		q.Songs, q.Pos = pl.Queue()
+		json.NewEncoder(w).Encode(q)
+	})
+	edit := func(f func(e queueEdit)) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			var e queueEdit
+			if err := json.NewDecoder(r.Body).Decode(&e); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			f(e)
+		}
+	}
+	mux.HandleFunc("/jump", edit(func(e queueEdit) { pl.Jump(e.I, e.ID) }))
+	mux.HandleFunc("/remove", edit(func(e queueEdit) { pl.Remove(e.I, e.ID) }))
+	mux.HandleFunc("/move", edit(func(e queueEdit) { pl.Move(e.I, e.D, e.ID) }))
 	// /repeat?mode=1: 0 off, 1 the queue, 2 the song
 	mux.HandleFunc("/repeat", func(w http.ResponseWriter, r *http.Request) {
 		m, _ := strconv.Atoi(r.URL.Query().Get("mode"))
@@ -248,6 +277,7 @@ func runDaemon(dir string) {
 	}
 	boost := newAudioBoost()
 	defer func() {
+		saveResume() // before Stop empties the queue
 		pl.Stop()
 		boost.update(false)
 		rl.close()
@@ -319,6 +349,7 @@ func runDaemon(dir string) {
 			}
 			sc.Tick(playing)
 			writeNow(st)
+			saveResume()
 			// Keep the device awake while music plays. Only remove the flag
 			// if this process set it: something else may want the device
 			// awake too.
@@ -491,6 +522,35 @@ func (r *remote) Next()      { r.post("/next", nil) }
 func (r *remote) Prev()      { r.post("/prev", nil) }
 func (r *remote) Stop()      { r.post("/stop", nil) }
 func (r *remote) Seek(d int) { r.post("/seek?d="+strconv.Itoa(d), nil) }
+
+// queueReply is the player's answer to /queue.
+type queueReply struct {
+	Songs []Song
+	Pos   int
+}
+
+// queueEdit is a change to song I of the queue, named by its ID too (see
+// Player.at); D is where to move it (-1 up, 1 down).
+type queueEdit struct {
+	I, D int
+	ID   string
+}
+
+// Queue returns the whole queue and the place in it.
+func (r *remote) Queue() ([]Song, int, error) {
+	resp, err := r.c.Get("http://" + r.addr + "/queue")
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	var q queueReply
+	err = json.NewDecoder(resp.Body).Decode(&q)
+	return q.Songs, q.Pos, err
+}
+
+func (r *remote) Jump(i int, id string)    { r.post("/jump", queueEdit{I: i, ID: id}) }
+func (r *remote) Remove(i int, id string)  { r.post("/remove", queueEdit{I: i, ID: id}) }
+func (r *remote) Move(i, d int, id string) { r.post("/move", queueEdit{I: i, D: d, ID: id}) }
 
 // Repeat sets the repeat mode: 0 off, 1 the queue, 2 the song.
 func (r *remote) Repeat(mode int) { r.post("/repeat?mode="+strconv.Itoa(mode), nil) }

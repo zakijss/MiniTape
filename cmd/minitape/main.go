@@ -170,6 +170,11 @@ type playerCtl interface {
 	Sleep(min int) // sleep timer: minutes, -1 for the end of the song, 0 off
 	Repeat(mode int)
 	State() NowPlaying
+	// the queue, and changes to song i of it, named by its id too
+	Queue() ([]Song, int, error)
+	Jump(i int, id string)
+	Remove(i int, id string)
+	Move(i, d int, id string) // d: -1 up, 1 down
 }
 
 // view is one screen on the navigation stack.
@@ -184,6 +189,12 @@ type view struct {
 	toNP    bool              // set by a loader: replace this view with Now Playing
 	refresh func()            // Y: load the list again from the server
 	shuffle func()            // X: play the songs shown in a random order
+	// keys, if set, takes the view's own buttons before the common ones,
+	// and reports whether it used the button.
+	keys func(b ui.Button) bool
+	// update, if set, runs before each draw, with the player's state.
+	update func(st NowPlaying)
+	hints  []ui.Hint // if set, the footer's buttons before SELECT and B
 
 	// Album and playlist pages show the cover and details on the left, and
 	// a short kind ("Album") in the header instead of repeating the name.
@@ -426,8 +437,9 @@ func main() {
 			rp.Reload()
 		}
 	}
-	// Opening MiniTape while music plays goes straight to it.
-	if st := a.player.State(); st.Has && st.Playing {
+	// Opening MiniTape while music plays, or with the queue saved at the
+	// last exit waiting (paused), goes straight to it.
+	if st := a.player.State(); st.Has {
 		a.np = true
 	}
 	a.push(a.home())
@@ -1010,6 +1022,13 @@ func (a *app) handle(ev ui.Event) {
 		case ui.Up:
 			a.lyrScroll = max(0, a.lyrScroll-3)
 		case ui.Down:
+			if !a.lyricsOn { // the queue
+				if a.player.State().Has {
+					a.np = false
+					a.push(a.queueView())
+				}
+				return
+			}
 			a.lyrScroll += 3
 		case ui.A, ui.Start:
 			a.player.Toggle()
@@ -1036,6 +1055,9 @@ func (a *app) handle(ev ui.Event) {
 		return
 	}
 	v := a.top()
+	if v.keys != nil && v.keys(ev.Button) {
+		return
+	}
 	switch ev.Button {
 	case ui.A:
 		if it := v.list.Selected(); it != nil && v.open != nil && !v.loading {
@@ -1310,8 +1332,13 @@ func (a *app) draw() {
 	if v.kind != "" {
 		head = v.kind
 	}
+	if v.update != nil {
+		v.update(st)
+	}
 	hints := []ui.Hint{{Button: "A", Label: "Open"}}
-	if v.songs != nil && v.kind != "" { // an album or playlist: A plays
+	if v.hints != nil {
+		hints = append([]ui.Hint(nil), v.hints...)
+	} else if v.songs != nil && v.kind != "" { // an album or playlist: A plays
 		hints[0].Label = "Play"
 	} else if v.play != nil {
 		hints = append(hints, ui.Hint{Button: "START", Label: "Play"})
@@ -1582,16 +1609,19 @@ func (a *app) drawNowPlaying() {
 	s.Icon(icon, cx-20, cy-20, 40, ui.BG)
 	s.Icon("next", cx+68, cy-18, 36, ui.Text)
 
-	// status or up next
+	// status or up next, and Down for the whole queue (the footer is full)
 	y = 392
+	queue := "DOWN: QUEUE"
+	qw := ui.Measure(ui.Caps, queue) + 16
+	s.TextRight(ui.W-28, y+2, queue, ui.Caps, ui.Faint)
 	switch {
 	case st.Err != "":
-		s.Text(28, y, ui.Fit(ui.Small, st.Err, ui.W-56), ui.Small, ui.Bad)
+		s.Text(28, y, ui.Fit(ui.Small, st.Err, ui.W-56-qw), ui.Small, ui.Bad)
 	case len(st.Next) > 0:
 		lbl := "UP NEXT"
 		s.Text(28, y+2, lbl, ui.Caps, ui.Muted)
 		s.Text(28+ui.Measure(ui.Caps, lbl)+12, y-1,
-			ui.Fit(ui.Small, st.Next[0].Title+"  ·  "+st.Next[0].Artist, ui.W-56-ui.Measure(ui.Caps, lbl)-12), ui.Small, ui.Text)
+			ui.Fit(ui.Small, st.Next[0].Title+"  ·  "+st.Next[0].Artist, ui.W-56-ui.Measure(ui.Caps, lbl)-12-qw), ui.Small, ui.Text)
 	}
 	play := "Pause"
 	if st.Paused || !st.Playing {
