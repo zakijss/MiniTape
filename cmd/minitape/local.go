@@ -371,6 +371,13 @@ func (a *app) localFolder(dir string) *view {
 		title = "Folders"
 	}
 	v := &view{title: title}
+	// the folders are A to Z; the songs after them are one group
+	v.letter = func(it *ui.Item) string {
+		if _, ok := it.Value.(string); ok {
+			return labelLetter(it)
+		}
+		return ""
+	}
 	v.open = func(it *ui.Item) {
 		switch x := it.Value.(type) {
 		case string:
@@ -416,7 +423,7 @@ func (a *app) localFolder(dir string) *view {
 
 // localArtists lists the artists on the card; A shows their albums.
 func (a *app) localArtists() *view {
-	v := &view{title: "Artists"}
+	v := &view{title: "Artists", letter: labelLetter}
 	v.open = func(it *ui.Item) { a.openArtist(it.Value.(Artist)) }
 	return a.loadLocal(v, func(all []localSong) ([]ui.Item, func(), error) {
 		ars := localArtists(all)
@@ -435,7 +442,7 @@ func (a *app) localArtists() *view {
 
 // localAlbums lists the albums on the card, A to Z.
 func (a *app) localAlbums() *view {
-	v := &view{title: "Albums", open: a.openAlbum}
+	v := &view{title: "Albums", open: a.openAlbum, letter: labelLetter}
 	v.play = func() {
 		if it := v.list.Selected(); it != nil {
 			a.playAlbum(it.Value.(Album))

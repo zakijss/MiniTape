@@ -192,6 +192,10 @@ type view struct {
 	info  []string
 	year  int
 	songs []Song
+
+	// letter, set on lists in A-to-Z order, gives a row's group (its
+	// first letter): Left and Right go to the previous and next group.
+	letter func(it *ui.Item) string
 }
 
 type app struct {
@@ -852,6 +856,13 @@ func (a *app) songItems(songs []Song) []ui.Item {
 func (a *app) artists() *view {
 	v := &view{title: "Artists"}
 	v.open = func(it *ui.Item) { a.openArtist(it.Value.(Artist)) }
+	// the server's own groups: it may file "The Beatles" under B
+	v.letter = func(it *ui.Item) string {
+		if x, ok := it.Value.(Artist); ok && x.index != "" {
+			return x.index
+		}
+		return labelLetter(it)
+	}
 	return a.load(v, func() ([]ui.Item, func(), error) {
 		ars, err := a.sub.Artists()
 		sub := fmt.Sprintf("%d artists", len(ars))
@@ -1052,10 +1063,12 @@ func (a *app) handle(ev ui.Event) {
 		if v.shuffle != nil && !v.loading {
 			v.shuffle()
 		}
-	case ui.L2: // to the top and the bottom of a long list
-		v.list.Sel = 0
-	case ui.R2:
-		v.list.Sel = max(0, len(v.list.Items)-1)
+	case ui.Left, ui.Right:
+		if v.letter != nil {
+			v.list.Sel = letterJump(v.list.Items, v.list.Sel, ev.Button == ui.Right, v.letter)
+		} else {
+			v.list.Handle(ev)
+		}
 	default:
 		v.list.Handle(ev)
 	}

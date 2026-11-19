@@ -113,6 +113,9 @@ type Artist struct {
 	Name       string  `json:"name"`
 	AlbumCount int     `json:"albumCount"`
 	Album      []Album `json:"album"`
+	// index is the letter the server files the artist under (it may skip
+	// "The"): the list's groups for Left and Right.
+	index string
 }
 
 // Playlist is a playlist; Entry is filled in only by Subsonic.Playlist.
@@ -137,6 +140,7 @@ type response struct {
 		Artist  *Artist `json:"artist"`
 		Artists *struct {
 			Index []struct {
+				Name   string   `json:"name"`
 				Artist []Artist `json:"artist"`
 			} `json:"index"`
 		} `json:"artists"`
@@ -323,7 +327,10 @@ func (c *Subsonic) Artists() ([]Artist, error) {
 	}
 	var out []Artist
 	for _, ix := range r.R.Artists.Index {
-		out = append(out, ix.Artist...)
+		for _, x := range ix.Artist {
+			x.index = ix.Name
+			out = append(out, x)
+		}
 	}
 	return out, nil
 }
