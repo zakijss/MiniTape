@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/hero.jpg" alt="A grey Miyoo Mini Plus on a wooden stand on a desk, playing music in MiniTape, next to a mug and a keyboard" width="100%"></p>
+<p align="center"><img src="docs/hero.jpg" alt="A white Miyoo Mini Plus on a stand on a sunlit window sill, playing music in MiniTape, with a smoked black one showing lyrics and a grey one lying beside it" width="100%"></p>
 
 https://github.com/user-attachments/assets/c08e63c8-1a9c-4db1-be37-518af5fb1e93
 
@@ -18,7 +18,7 @@ A music player for [Navidrome](https://www.navidrome.org) and other Subsonic ser
 - Synced lyrics, covers drawn in the interface's pixel style, a sleep timer, and scrobbling to Last.fm and ListenBrainz.
 - Songs download to the card ahead of the music, so they start at once and Wi-Fi drops aren't heard; the bit rate steps down when the link can't keep up. Up to 500 MB of songs (by default) stay on the card and play again offline.
 
-<p align="center"><img src="docs/desk.jpg" alt="A smoked black Miyoo Mini Plus on a stand playing music in MiniTape, with headphones beside it" width="100%"></p>
+<p align="center"><img src="docs/desk.jpg" alt="A white Miyoo Mini Plus on a stand on a sunlit window sill, playing music in MiniTape, with a smoked black one beside it showing lyrics" width="100%"></p>
 
 ## Install
 
