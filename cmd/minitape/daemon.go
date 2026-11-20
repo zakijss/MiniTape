@@ -89,6 +89,8 @@ func runDaemon(dir string) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	// the radio directory, told when a station starts (see radioDir.click)
+	radio := &radioDir{http: tnet.Client(20 * time.Second)}
 	pl := NewPlayer(rl.URL, nil)
 	pl.prefetch = rl.Prefetch
 	pl.root = func() string {
@@ -107,6 +109,15 @@ func runDaemon(dir string) {
 		res.save(pl, st, st.Playing && !st.Paused && !st.Suspended, server)
 	}
 
+	// state is the player's state with what the relay knows: the bit rate
+	// streamed and a station's song.
+	state := func() NowPlaying {
+		st := pl.State()
+		st.Kbps = rl.playingRate()
+		st.Live = rl.liveTitle(st.Song.ID)
+		return st
+	}
+
 	mux := http.NewServeMux()
 	var lastAsked atomic.Int64 // when the screen last asked for the state
 	lastAsked.Store(time.Now().Unix())
@@ -114,8 +125,7 @@ func runDaemon(dir string) {
 	var sleepAt atomic.Int64
 	mux.HandleFunc("/state", func(w http.ResponseWriter, r *http.Request) {
 		lastAsked.Store(time.Now().Unix())
-		st := pl.State()
-		st.Kbps = rl.playingRate()
+		st := state()
 		if at := sleepAt.Load(); at > 0 {
 			st.SleepLeft = max(1, int(at-time.Now().Unix()))
 		}
@@ -316,14 +326,23 @@ func runDaemon(dir string) {
 				log.Printf("sleep timer: pausing")
 				pl.Pause()
 			}
-			st := pl.State()
+			st := state()
 			playing := st.Has && st.Playing && !st.Paused && !st.Suspended
 			boost.update(playing)
 			cfgMu.Lock()
 			overlayOn = cfg.menuTicker() // Settings may have changed it
 			toServer := cfg.serverScrobble()
 			cfgMu.Unlock()
-			if playing {
+			if playing && st.Song.Radio != "" {
+				// A station isn't scrobbled; the directory counts a listen
+				// each time one starts.
+				if st.Plays != scrobbled {
+					scrobbled = st.Plays
+					if uuid, ok := strings.CutPrefix(st.Song.ID, radioPrefix); ok {
+						go radio.click(uuid)
+					}
+				}
+			} else if playing {
 				// Songs from the card aren't the server's, and go to
 				// Last.fm and ListenBrainz only when tagged with an artist.
 				local := st.Song.Path != ""
@@ -377,7 +396,7 @@ func runDaemon(dir string) {
 			if ov == nil || (!overlayOn && !shown) {
 				continue
 			}
-			st := pl.State()
+			st := state()
 			// Notice the menu closing (a game or app starting) within a
 			// frame, not a second later.
 			if menuUp {
@@ -393,13 +412,22 @@ func runDaemon(dir string) {
 			}
 			shown = show
 			if show {
-				ov.Draw(tickerText(st.Song))
+				ov.Draw(nowText(st))
 			}
 			setGuard(show)
 		case <-guardC:
 			ov.Guard()
 		}
 	}
+}
+
+// nowText is what's playing as the tickers show it: for a station, the
+// song it says it plays, then its name.
+func nowText(st NowPlaying) string {
+	if st.Live != "" {
+		return st.Live + "   ·   " + st.Song.Title
+	}
+	return tickerText(st.Song)
 }
 
 func tickerText(s Song) string {
@@ -421,7 +449,7 @@ func writeNow(st NowPlaying) {
 		os.Remove(nowFile)
 		return
 	}
-	b, err := json.Marshal(ui.Now{Text: tickerText(st.Song), Paused: st.Paused})
+	b, err := json.Marshal(ui.Now{Text: nowText(st), Paused: st.Paused})
 	if err != nil {
 		return
 	}

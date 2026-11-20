@@ -116,6 +116,9 @@ func (p *Player) Restore(q []Song, pos int, at time.Duration, repeat int) {
 		return
 	}
 	p.stopLocked()
+	if q[pos].Radio != "" { // a station plays from now
+		at = 0
+	}
 	p.queue, p.pos, p.offset, p.suspended = q, pos, max(0, at), false
 	p.repeat = min(max(repeat, repeatOff), repeatOne)
 	p.qver++
@@ -206,8 +209,11 @@ func (p *Player) startLocked(at time.Duration) {
 	if p.pos < 0 || p.pos >= len(p.queue) {
 		return
 	}
-	sec := int(at.Seconds())
 	song := p.queue[p.pos]
+	if song.Radio != "" { // a live stream: it plays from now
+		at = 0
+	}
+	sec := int(at.Seconds())
 	args := []string{"-nodisp", "-autoexit", "-loglevel", "quiet"}
 	if song.Path != "" { // a file on the card: ffplay seeks in it
 		root := defaultMusicDir
@@ -243,7 +249,7 @@ func (p *Player) startLocked(at time.Duration) {
 		p.plays++
 	}
 	p.cmd, p.started, p.pausedD, p.offset = cmd, time.Now(), 0, time.Duration(sec)*time.Second
-	if p.prefetch != nil && p.pos+1 < len(p.queue) && p.queue[p.pos+1].Path == "" {
+	if p.prefetch != nil && p.pos+1 < len(p.queue) && p.queue[p.pos+1].Path == "" && p.queue[p.pos+1].Radio == "" {
 		p.prefetch(p.queue[p.pos+1])
 	}
 	gen := p.gen
@@ -254,11 +260,18 @@ func (p *Player) startLocked(at time.Duration) {
 			played := time.Since(p.started) - p.pausedD
 			// a song that ends at once from its start (empty, or a format
 			// ffplay can't read) fails too: with repeat it would start
-			// again and again, a play counted each time
-			if err != nil && played < 3*time.Second || p.offset == 0 && played < p.minPlayed {
+			// again and again, a play counted each time. So does a station
+			// ffplay failed on (rather than one whose stream ended): tuning
+			// in again would fail the same way.
+			if err != nil && (played < 3*time.Second || song.Radio != "") || p.offset == 0 && played < p.minPlayed {
 				p.err = "Playback failed (server, network or format)."
 				p.cmd = nil
 				p.idleSince = time.Now()
+			} else if song.Radio != "" {
+				// a station doesn't end: its stream dropped, so tune in
+				// again, as the same play
+				p.cmd = nil
+				p.restartLocked(0)
 			} else {
 				p.cmd = nil
 				p.songEndedLocked()
@@ -313,11 +326,17 @@ func (p *Player) Toggle() {
 		}
 		return
 	}
-	if p.paused {
+	switch {
+	case p.paused:
 		p.cmd.Process.Signal(syscall.SIGCONT)
 		p.pausedD += time.Since(p.pausedAt)
 		p.paused = false
-	} else {
+	case p.radioLocked():
+		// A station doesn't wait: held paused, its stream would stall. It
+		// stops instead, and A tunes in again, live.
+		p.stopLocked()
+		p.offset = 0
+	default:
 		p.cmd.Process.Signal(syscall.SIGSTOP)
 		p.pausedAt = time.Now()
 		p.paused = true
@@ -346,11 +365,12 @@ func (p *Player) SetRepeat(mode int) {
 	p.mu.Unlock()
 }
 
-// Prev restarts the track, or goes to the previous one in the first 5 s.
+// Prev restarts the track, or goes to the previous one in the first 5 s;
+// a station goes to the previous one at once.
 func (p *Player) Prev() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.elapsedLocked() > 5*time.Second || p.pos == 0 {
+	if p.elapsedLocked() > 5*time.Second && !p.radioLocked() || p.pos == 0 {
 		p.startLocked(0)
 		return
 	}
@@ -364,7 +384,7 @@ func (p *Player) Prev() {
 func (p *Player) Seek(d int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.suspended || p.pos < 0 || p.pos >= len(p.queue) {
+	if p.suspended || p.pos < 0 || p.pos >= len(p.queue) || p.radioLocked() {
 		return
 	}
 	at := max(0, p.elapsedLocked()+time.Duration(d)*time.Second)
@@ -440,6 +460,11 @@ func (p *Player) Resume() {
 	p.restartLocked(p.offset)
 }
 
+// radioLocked reports whether the current track is a radio station.
+func (p *Player) radioLocked() bool {
+	return p.pos >= 0 && p.pos < len(p.queue) && p.queue[p.pos].Radio != ""
+}
+
 // IdleFor reports how long nothing has been playing (0 while playing).
 func (p *Player) IdleFor() time.Duration {
 	p.mu.Lock()
@@ -475,6 +500,9 @@ type NowPlaying struct {
 	Plays int `json:"plays"`
 	// Queue changes when the queue does (see Player.qver).
 	Queue int `json:"queue"`
+	// Live is the song a radio station says it is playing (its ICY
+	// StreamTitle), "" when it says nothing.
+	Live string `json:"live,omitempty"`
 }
 
 // State returns the player's state, with up to three songs coming next.

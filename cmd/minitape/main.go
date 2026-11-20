@@ -12,6 +12,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -59,6 +60,14 @@ type Settings struct {
 	// LocalOnly: the first start was told to play only the card's music,
 	// so it doesn't ask for a server again.
 	LocalOnly bool `json:"local_only,omitempty"`
+	// Radio › Options, for every list of stations: the order ("votes", the
+	// default, "trend", "name" or "bitrate"), whether stations that failed
+	// the directory's last check show, only MP3 and AAC streams, and the
+	// lowest bit rate in kbit/s (0: any).
+	RadioSort    string `json:"radio_sort,omitempty"`
+	RadioBroken  bool   `json:"radio_show_broken,omitempty"`
+	RadioMP3AAC  bool   `json:"radio_mp3_aac_only,omitempty"`
+	RadioMinKbps int    `json:"radio_min_kbps,omitempty"`
 }
 
 // musicDir is the folder of music on the card.
@@ -253,6 +262,10 @@ type app struct {
 
 	lib    *localLib // the music on the card
 	server bool      // a server is set up
+
+	dir   string      // the app's folder, for settings.json
+	radio *radioDir   // the radio directory
+	favs  *favourites // the starred stations
 }
 
 // forgetServer drops what was kept in memory from the last server
@@ -276,8 +289,12 @@ func (a *app) forgetServer() {
 	a.starMu.Unlock()
 }
 
-// isStarred reports whether s is starred, counting R2 presses on Now Playing.
+// isStarred reports whether s is starred, counting R2 presses on Now
+// Playing; a station, whether it is a favourite.
 func (a *app) isStarred(s Song) bool {
+	if s.Radio != "" {
+		return a.favs.has(s.ID)
+	}
 	a.starMu.Lock()
 	defer a.starMu.Unlock()
 	if on, ok := a.stars[s.ID]; ok {
@@ -287,8 +304,13 @@ func (a *app) isStarred(s Song) bool {
 }
 
 // toggleStar stars or unstars s on the server, showing the new state at
-// once and going back to the old one if the server says no.
+// once and going back to the old one if the server says no. A station is
+// starred in the favourites.
 func (a *app) toggleStar(s Song) {
+	if s.Radio != "" {
+		a.toggleFavourite(stationOf(s))
+		return
+	}
 	if s.ID == "" || s.Path != "" { // songs on the card can't be starred
 		return
 	}
@@ -358,7 +380,8 @@ func main() {
 	a := &app{scr: scr, input: input, covers: map[coverKey]image.Image{}, pending: map[coverKey]bool{}, failed: map[coverKey]time.Time{},
 		backdrops: map[string]*image.RGBA{}, fetchSem: make(chan struct{}, 3),
 		cfg: &cfg, lyr: map[string]*songLyrics{}, done: make(chan func(), 8),
-		lib: &localLib{file: filepath.Join(dir, localIndexFile)}, server: hasServer(cfg, sec)}
+		lib: &localLib{file: filepath.Join(dir, localIndexFile)}, server: hasServer(cfg, sec),
+		dir: dir, favs: loadFavourites(filepath.Join(dir, radioFavouritesFile))}
 	a.poke = func() {
 		select {
 		case redraw <- struct{}{}:
@@ -368,6 +391,7 @@ func main() {
 	a.sub = &Subsonic{Base: cfg.URL, User: cfg.User, Password: sec[cfg.Secret], HTTP: tnet.Client(20 * time.Second),
 		Cache: cache.New(filepath.Join(dir, "cache"))}
 	go a.sub.Cache.Prune(150 << 20) // covers and lists, least recently used first
+	a.radio = &radioDir{http: tnet.Client(20 * time.Second), cache: a.sub.Cache}
 	// The music itself plays in a background service, so it keeps going
 	// after this screen closes.
 	if !daemonAlive(300 * time.Millisecond) {
@@ -700,6 +724,8 @@ func (a *app) home() *view {
 	if !a.server { // only the card's music
 		items = a.localItems()
 	}
+	items = append(items, ui.Item{Label: "Radio", Icon: "wifi", Chevron: true, Sub: "Stations from around the world",
+		Value: func() { a.push(a.radioHome()) }})
 	items = append(items, ui.Item{Label: "Settings", Icon: "gear", Sub: "Server, scrobbling and appearance", Chevron: true, Value: func() { a.settings() }})
 	return &view{title: "MiniTape", list: ui.List{Items: items},
 		open: func(it *ui.Item) { it.Value.(func())() }}
@@ -859,7 +885,7 @@ func (a *app) songItems(songs []Song) []ui.Item {
 	items := make([]ui.Item, len(songs))
 	for i, x := range songs {
 		id := x.CoverArt
-		items[i] = ui.Item{Label: x.Title, Sub: x.Artist, Detail: fmtDur(x.Duration), Value: i,
+		items[i] = ui.Item{Label: x.Title, Sub: x.Artist, Detail: durText(x), Value: i,
 			Image: func() image.Image { return a.shown(a.thumb(id), a.listThumb) }}
 	}
 	return items
@@ -924,6 +950,14 @@ func plural(n int, word string) string {
 }
 
 func fmtDur(sec int) string { return fmt.Sprintf("%d:%02d", sec/60, sec%60) }
+
+// durText is a song's length in a list; nothing for a station.
+func durText(s Song) string {
+	if s.Radio != "" {
+		return ""
+	}
+	return fmtDur(s.Duration)
+}
 
 func totalDur(s []Song) string {
 	t := 0
@@ -1013,6 +1047,9 @@ func (a *app) handle(ev ui.Event) {
 	if a.np {
 		switch ev.Button {
 		case ui.Y:
+			if a.player.State().Song.Radio != "" { // no lyrics for a station
+				return
+			}
 			a.lyricsOn = !a.lyricsOn
 			a.lyrScroll = 0
 			if a.lyricsOn {
@@ -1324,7 +1361,7 @@ func (a *app) draw() {
 	v := a.top()
 	st := a.player.State()
 	if st.Has && st.Playing {
-		s.SetTicker(st.Song.Title + "   ·   " + st.Song.Artist + "   ·   " + st.Song.Album)
+		s.SetTicker(nowText(st))
 	} else {
 		s.SetTicker("")
 	}
@@ -1382,7 +1419,7 @@ func (a *app) draw() {
 			if st.Has && st.Playing && v.songs[k].ID == st.Song.ID {
 				it.Detail = "playing"
 			} else {
-				it.Detail = fmtDur(v.songs[k].Duration)
+				it.Detail = durText(v.songs[k])
 			}
 		}
 	}
@@ -1478,12 +1515,12 @@ func (a *app) drawMini(st NowPlaying, r image.Rectangle) {
 		s.RoundPicture(img, art, 8)
 	} else {
 		s.RoundRectAlpha(art, 8, ui.Text, 0.12)
-		s.Icon("note", art.Min.X+th/4, art.Min.Y+th/4, th/2, ui.Faint)
+		s.Icon(songIcon(st.Song), art.Min.X+th/4, art.Min.Y+th/4, th/2, ui.Faint)
 	}
 	x := art.Max.X + 12
 	room := r.Max.X - 70 - x
 	s.Text(x, r.Min.Y+6, ui.Fit(ui.Heading, st.Song.Title, room), ui.Heading, ui.Text)
-	s.Text(x, r.Min.Y+29, ui.Fit(ui.Small, st.Song.Artist, room), ui.Small, ui.Muted)
+	s.Text(x, r.Min.Y+29, ui.Fit(ui.Small, cmp.Or(st.Live, st.Song.Artist), room), ui.Small, ui.Muted)
 	icon := "pause"
 	if st.Paused || !st.Playing {
 		icon = "play"
@@ -1507,7 +1544,8 @@ func (a *app) drawNowPlaying() {
 		s.Background()
 	}
 	s.StatusBar()
-	if a.lyricsOn && st.Has {
+	radio := st.Song.Radio != ""
+	if a.lyricsOn && st.Has && !radio {
 		a.drawLyrics(st)
 		return
 	}
@@ -1542,7 +1580,7 @@ func (a *app) drawNowPlaying() {
 		s.RoundPicture(img, art, 16)
 	} else {
 		s.Panel(art, 16)
-		s.Icon("note", art.Min.X+66, art.Min.Y+66, 100, ui.Muted)
+		s.Icon(songIcon(st.Song), art.Min.X+66, art.Min.Y+66, 100, ui.Muted)
 	}
 
 	x, w := 286, ui.W-286-28
@@ -1564,16 +1602,20 @@ func (a *app) drawNowPlaying() {
 		y += ui.LineHeight(f)
 	}
 	y += 6
-	s.Text(x, y, ui.Fit(ui.Heading, st.Song.Artist, w), ui.Heading, ui.Text)
+	artist, album := st.Song.Artist, st.Song.Album
+	if radio && st.Live != "" { // the song the station plays, then where it is from
+		artist, album = st.Live, st.Song.Artist
+	}
+	s.Text(x, y, ui.Fit(ui.Heading, artist, w), ui.Heading, ui.Text)
 	y += ui.LineHeight(ui.Heading) + 2
-	s.Text(x, y, ui.Fit(ui.Small, st.Song.Album, w), ui.Small, ui.Muted)
+	s.Text(x, y, ui.Fit(ui.Small, album, w), ui.Small, ui.Muted)
 	y += ui.LineHeight(ui.Small) + 6
 	rate := st.Kbps // what the player streams at: lower on a slow link
 	if rate == 0 {
 		rate = a.cfg.bitRate()
 	}
 	format := a.cfg.Format
-	if st.Song.Path != "" { // played from the file as it is
+	if st.Song.Path != "" || radio { // played as it is
 		format, rate = "", 0
 	}
 	if info := streamInfo(st.Song, format, rate); info != "" && y+ui.LineHeight(ui.Caps) < 240 {
@@ -1591,11 +1633,17 @@ func (a *app) drawNowPlaying() {
 		frac = float64(el) / float64(dur)
 	}
 	py := 246
-	s.Bar(image.Rect(x, py, ui.W-28, py+6), frac, ui.Text)
-	kx := x + int(float64(ui.W-28-x)*frac)
-	s.Circle(float64(kx), float64(py+3), 7, ui.Text)
-	s.Text(x, py+14, fmtDur(el), ui.Small, ui.Muted)
-	s.TextRight(ui.W-28, py+14, fmtDur(dur), ui.Small, ui.Muted)
+	if radio { // live: no length and no seeking, only the time listened
+		s.Circle(float64(x+6), float64(py+9), 6, ui.Accent)
+		s.Text(x+20, py+2, "LIVE", ui.Caps, ui.Accent)
+		s.TextRight(ui.W-28, py, fmtDur(el), ui.Small, ui.Muted)
+	} else {
+		s.Bar(image.Rect(x, py, ui.W-28, py+6), frac, ui.Text)
+		kx := x + int(float64(ui.W-28-x)*frac)
+		s.Circle(float64(kx), float64(py+3), 7, ui.Text)
+		s.Text(x, py+14, fmtDur(el), ui.Small, ui.Muted)
+		s.TextRight(ui.W-28, py+14, fmtDur(dur), ui.Small, ui.Muted)
+	}
 
 	// transport
 	cx := x + w/2
@@ -1627,7 +1675,19 @@ func (a *app) drawNowPlaying() {
 	if st.Paused || !st.Playing {
 		play = "Play"
 	}
-	s.Footer(ui.Hint{Button: "A", Label: play}, ui.Hint{Button: "L1/R1", Label: "Skip"}, ui.Hint{Button: "Y", Label: "Lyrics"}, ui.Hint{Button: "X", Label: "Stop"}, ui.Hint{Button: "B", Label: "Browse"})
+	hints := []ui.Hint{{Button: "A", Label: play}, {Button: "L1/R1", Label: "Skip"}, {Button: "Y", Label: "Lyrics"}, {Button: "X", Label: "Stop"}, {Button: "B", Label: "Browse"}}
+	if radio {
+		hints = slices.Delete(hints, 2, 3)
+	}
+	s.Footer(hints...)
+}
+
+// songIcon is the picture in place of a song's missing cover.
+func songIcon(s Song) string {
+	if s.Radio != "" {
+		return "wifi"
+	}
+	return "note"
 }
 
 // streamInfo describes the file and what's streamed, e.g.

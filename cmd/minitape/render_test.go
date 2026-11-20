@@ -63,8 +63,9 @@ func testCover(t *testing.T) []byte {
 }
 
 // TestScreens draws Now Playing, an album page, an album list with the
-// mini player, the lyrics and a failed lyrics fetch to PNG files in DIR
-// for review. It runs only with MINIDECK_GALLERY=DIR set.
+// mini player, the lyrics, a failed lyrics fetch, Settings and the radio
+// screens to PNG files in DIR for review. It runs only with
+// MINIDECK_GALLERY=DIR set.
 func TestScreens(t *testing.T) {
 	dir := os.Getenv("MINIDECK_GALLERY")
 	if dir == "" {
@@ -194,4 +195,38 @@ func TestScreens(t *testing.T) {
 		t.Fatal(err)
 	}
 	drawLastFMLogin(a.scr, link, code, time.Unix(1, 0))
+
+	// Radio: its first screen, a list of stations with one playing, Now
+	// Playing on a station that sends its song titles, and the options.
+	a.done = make(chan func(), 8)
+	a.favs = loadFavourites(filepath.Join(t.TempDir(), radioFavouritesFile))
+	stations := []Station{
+		{UUID: "u1", Name: "Night Signals FM", URL: "http://n/", Country: "Germany", Language: "german", Tags: "ambient,electronic,chill", Codec: "MP3", Bitrate: 128, Votes: 900, OK: 1},
+		{UUID: "u2", Name: "Coastline Jazz", URL: "http://c/", Country: "Portugal", Language: "portuguese", Tags: "jazz", Codec: "AAC+", Bitrate: 64, Votes: 700, OK: 1},
+		{UUID: "u3", Name: "Radio Antenna Nord", URL: "http://a/", Country: "Norway", Language: "norwegian", Codec: "MP3", Bitrate: 192, Votes: 500, OK: 1},
+		{UUID: "u4", Name: "Low Orbit Lo-fi", URL: "http://l/", Country: "The Netherlands", Language: "english", Codec: "OGG", Bitrate: 160, Votes: 300, OK: 1},
+		{UUID: "u5", Name: "Harbour News 24", URL: "http://h/", Country: "Ireland", Language: "english,irish", Codec: "AAC", Bitrate: 96, Votes: 100, OK: 1},
+	}
+	a.favs.toggle(stations[1])
+	a.favs.toggle(stations[3])
+	onAir := stations[0].song()
+	a.player = &stillPlayer{NowPlaying{Song: onAir, Has: true, Playing: true, Elapsed: 754 * time.Second,
+		Pos: 0, Len: len(stations), Next: []Song{stations[1].song()}, Live: "Nils Frahm - Says"}}
+	a.np, a.lyricsOn = false, false
+
+	open("minitape-radio")
+	a.stack = []*view{{title: "MiniTape"}, a.radioHome()}
+	a.draw()
+
+	open("minitape-radio-stations")
+	v := a.stationList("Popular", "", func() ([]Station, error) { return stations, nil })
+	a.stack = []*view{{title: "MiniTape"}, a.radioHome(), v}
+	a.waitLoaded(t, v)
+
+	open("minitape-radio-now-playing")
+	a.np = true
+	a.draw()
+
+	open("minitape-radio-options")
+	drawMenu(a.scr, "Radio options", &ui.List{Items: radioOptionItems(Settings{RadioSort: "name", RadioMinKbps: 64})})
 }

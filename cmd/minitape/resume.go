@@ -112,7 +112,7 @@ func loadResume(dir, server, root string) (q []Song, pos int, at time.Duration, 
 			if _, err := os.Stat(p); err != nil {
 				continue
 			}
-		} else if server == "" || sq.Server != server {
+		} else if s.Radio == "" && (server == "" || sq.Server != server) { // stations play from anywhere
 			continue
 		}
 		if i >= pos && newPos < 0 {

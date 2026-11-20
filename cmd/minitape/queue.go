@@ -58,7 +58,7 @@ func (a *app) queueView() *view {
 			switch {
 			case i >= len(songs):
 			case i != st.Pos:
-				it.Detail = fmtDur(songs[i].Duration)
+				it.Detail = durText(songs[i])
 			case st.Playing && !st.Paused:
 				it.Detail = "playing"
 			default:

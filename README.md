@@ -11,6 +11,7 @@ A music player for [Navidrome](https://www.navidrome.org) and other Subsonic ser
 - Recently added, random, most played and starred albums, artists, playlists, search, and **Shuffle everything** in one press.
 - Plays in the background, with the song scrolling across the top of the screen; **Settings > Background playback** turns that off.
 - **On this card** plays the music in `Media/Music` on the SD card by folder, artist or album, with no server and no Wi-Fi.
+- **Radio** plays internet radio from [radio-browser.info](https://www.radio-browser.info), with or without a server: favourites, popular and trending stations, genres, countries, languages, search, and your server's own stations. Now Playing shows the song a station is on when it sends the title.
 - The queue, the song and the time in it are kept when MiniTape or the device turns off; the next start opens on them, paused.
 - A list of the queue to jump around in, take songs out of or reorder, and a jump to the next letter in long lists.
 - Synced lyrics, covers drawn in the interface's pixel style, and scrobbling to Last.fm and ListenBrainz.
@@ -32,6 +33,14 @@ When MiniTape starts with a queue saved from last time, it opens on the now-play
 The sleep timer pauses the music after 15 minutes to 90 minutes, or at the end of the song, and keeps counting with MiniTape closed; the time left shows at the top of the now-playing screen. The Miyoo can't tell when headphones are plugged in or out (the jack switches the speaker off by itself), so MiniTape doesn't pause on unplugging.
 
 In the lists, **Y** refreshes from the server (lists open at once from the copy on the card), **X** shuffles an album or playlist, and **L2**/**R2** jump to the top and the bottom. In Artists, and in Albums and Folders on the card, **Left**/**Right** go to the first entry of the previous or next letter (the server's artists by its own letters, so "The Beatles" may be under B); elsewhere they move six rows, as **L1**/**R1** do. **Search** on the first screen finds artists, albums and songs.
+
+### Radio
+
+**Radio** on the first screen lists stations from radio-browser.info, a free directory, and the internet radio stations set up on your server, if it has any. In a list of stations **A** plays one, **X** stars it (starred stations are under **Favourites**) and **Y** asks the directory again. Lists are kept on the card, stations for 6 hours and genres, countries and languages for a week, and still open from there when there is no network.
+
+On the now-playing screen a station shows LIVE, its format and bit rate, and the song it is playing when it sends the title. **L1**/**R1** go to the previous or next station in the list it was started from, **R2** stars it, and **A** stops it; pressed again it tunes in live. A stream that drops is connected again, and the last station is there on the next start, like a song.
+
+**Radio > Options** sorts every list of stations by popularity, trending, name or bit rate, shows or hides the stations that failed the directory's last check, keeps only MP3 and AAC streams, and leaves out stations below 64 or 128 kbit/s. Starting a station counts a listen with the directory, which asks players to do this; stations are never sent to Last.fm, ListenBrainz or the server.
 
 ### Music on the card
 

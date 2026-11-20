@@ -44,7 +44,8 @@ type relay struct {
 	limit   func() int64                         // the room for songs in Settings
 	format  func() string                        // the format in Settings
 	client  *http.Client
-	store   *cache.Disk // nil: songs are kept in memory only
+	radio   *http.Client // for stations (see radioClient)
+	store   *cache.Disk  // nil: songs are kept in memory only
 
 	mu      sync.Mutex
 	songs   map[string]Song // what the server says about each song asked for
@@ -53,6 +54,8 @@ type relay struct {
 	next    *fetch          // the song after it, fetched ahead
 	down    int             // quality steps below the setting
 	good    int             // songs in a row that downloaded quickly
+	// the station playing and the song it said it plays (see liveTitle)
+	liveID, live string
 }
 
 const (
@@ -99,7 +102,8 @@ func startRelay(src func(id string, at, kbps int) string, maxRate func() int, fo
 	// Connect and header timeouts, but no overall one: songs take minutes.
 	client := tnet.Client(20 * time.Second)
 	client.Timeout = 0
-	r := &relay{addr: ln.Addr().String(), src: src, maxRate: maxRate, format: format, limit: limit, client: client, songs: map[string]Song{}}
+	r := &relay{addr: ln.Addr().String(), src: src, maxRate: maxRate, format: format, limit: limit, client: client,
+		radio: radioClient(), songs: map[string]Song{}}
 	if cacheDir != "" {
 		r.store = cache.New(cacheDir)
 		r.prune()
@@ -121,6 +125,9 @@ func (r *relay) prune() {
 // after: a fetch of s already under way is set aside for ffplay here, so
 // that prefetch doesn't replace it.
 func (r *relay) URL(s Song, at int) string {
+	if s.Radio != "" {
+		return r.radioURL(s)
+	}
 	r.note(s)
 	r.mu.Lock()
 	if n := r.next; n != nil && n.id == s.ID && at == 0 {
@@ -163,6 +170,10 @@ func (r *relay) rate() int {
 }
 
 func (r *relay) serve(w http.ResponseWriter, req *http.Request) {
+	if id, ok := strings.CutPrefix(req.URL.Path, "/r/"); ok {
+		r.serveRadio(w, req, id)
+		return
+	}
 	id := strings.TrimPrefix(req.URL.Path, "/s/")
 	at, _ := strconv.Atoi(req.URL.Query().Get("t"))
 	r.mu.Lock()

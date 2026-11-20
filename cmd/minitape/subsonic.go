@@ -63,7 +63,7 @@ func (c *Subsonic) SetLogin(base, user, password string) {
 var cacheable = map[string]bool{
 	"getAlbumList2": true, "getAlbum": true, "getArtists": true, "getArtist": true,
 	"getPlaylists": true, "getPlaylist": true, "getStarred2": true,
-	"getLyricsBySongId": true, "getLyrics": true,
+	"getLyricsBySongId": true, "getLyrics": true, "getInternetRadioStations": true,
 }
 
 // cacheKey names a request without its per-request salt and token.
@@ -95,16 +95,20 @@ type Song struct {
 	// is the path too); empty for the server's songs. No server reply can
 	// set it: it is kept only in MiniTape's own JSON, through ownSong.
 	Path string `json:"-"`
+	// Radio is the stream of a radio station (see radio.go); like Path,
+	// only MiniTape's own JSON carries it.
+	Radio string `json:"-"`
 }
 
 // ownSong is a Song in MiniTape's own JSON (between the screen and the
 // player, and in the saved queue), the only JSON that carries Path.
 type ownSong struct {
 	Song
-	Path string `json:"localPath,omitempty"`
+	Path  string `json:"localPath,omitempty"`
+	Radio string `json:"radioUrl,omitempty"`
 }
 
-func own(s Song) ownSong { return ownSong{s, s.Path} }
+func own(s Song) ownSong { return ownSong{Song: s, Path: s.Path, Radio: s.Radio} }
 
 func ownSongs(q []Song) []ownSong {
 	o := make([]ownSong, len(q))
@@ -115,7 +119,7 @@ func ownSongs(q []Song) []ownSong {
 }
 
 func (o ownSong) song() Song {
-	o.Song.Path = o.Path
+	o.Song.Path, o.Song.Radio = o.Path, o.Radio
 	return o.Song
 }
 
@@ -203,6 +207,13 @@ type response struct {
 				} `json:"line"`
 			} `json:"structuredLyrics"`
 		} `json:"lyricsList"`
+		InternetRadioStations *struct {
+			Station []struct {
+				ID        string `json:"id"`
+				Name      string `json:"name"`
+				StreamURL string `json:"streamUrl"`
+			} `json:"internetRadioStation"`
+		} `json:"internetRadioStations"`
 		Starred2 *struct {
 			Album []Album `json:"album"`
 			Song  []Song  `json:"song"`
@@ -339,6 +350,19 @@ func (c *Subsonic) AlbumList(typ string, size int) ([]Album, error) {
 		return nil, err
 	}
 	return r.R.AlbumList2.Album, nil
+}
+
+// InternetRadioStations lists the radio stations set up on the server.
+func (c *Subsonic) InternetRadioStations() ([]Station, error) {
+	r, err := c.call("getInternetRadioStations", nil)
+	if err != nil || r.R.InternetRadioStations == nil {
+		return nil, err
+	}
+	var st []Station
+	for _, x := range r.R.InternetRadioStations.Station {
+		st = append(st, Station{Server: x.ID, Name: x.Name, URL: x.StreamURL, OK: 1})
+	}
+	return st, nil
 }
 
 // Album returns an album with its songs.
