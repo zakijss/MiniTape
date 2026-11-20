@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/hero.jpg" alt="A white Miyoo Mini Plus on a stand playing Pray for Me by The Weeknd and Kendrick Lamar in MiniTape, on a rosewood table in a lounge, with a cassette player and two more handhelds playing Tame Impala and Evanescence" width="100%"></p>
 
-https://github.com/user-attachments/assets/c08e63c8-1a9c-4db1-be37-518af5fb1e93
+https://github.com/user-attachments/assets/a0165947-ddd5-4e33-b878-4a173a2fa1d0
 
 [![CI](https://github.com/zakijss/MiniTape/actions/workflows/ci.yml/badge.svg)](https://github.com/zakijss/MiniTape/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/zakijss/MiniTape)](https://github.com/zakijss/MiniTape/releases)
