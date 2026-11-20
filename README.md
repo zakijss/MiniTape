@@ -1,5 +1,7 @@
 <p align="center"><img src="docs/hero.jpg" alt="A grey Miyoo Mini Plus on a wooden stand on a desk, playing music in MiniTape, next to a mug and a keyboard" width="100%"></p>
 
+https://github.com/user-attachments/assets/c08e63c8-1a9c-4db1-be37-518af5fb1e93
+
 [![CI](https://github.com/zakijss/MiniTape/actions/workflows/ci.yml/badge.svg)](https://github.com/zakijss/MiniTape/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/zakijss/MiniTape)](https://github.com/zakijss/MiniTape/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
