@@ -24,7 +24,8 @@ func (a *app) radioHome() *view {
 	}
 	items := []ui.Item{
 		{Label: "Favourites", Icon: "star", Chevron: true, Value: func() {
-			a.push(a.stationList("Favourites", "No favourites yet. X on a station stars it.",
+			// the options never hide a starred station; only the order applies
+			a.push(a.stationList("Favourites", "No favourites yet. X on a station stars it.", false,
 				func() ([]Station, error) { return a.favs.all(), nil }))
 		}},
 		{Label: "Popular", Icon: "chart", Chevron: true, Sub: "The most votes", Value: stations("Popular", url.Values{"order": {"votes"}})},
@@ -42,6 +43,9 @@ func (a *app) radioHome() *view {
 		its := v.list.Items
 		its[0].Sub = plural(len(a.favs.all()), "station")
 		its[len(its)-1].Sub = "Sorted by " + strings.ToLower(sortLabel(*a.cfg))
+		if a.cfg.radioSort() == "list" {
+			its[len(its)-1].Sub = "In list order"
+		}
 	}
 	if a.server {
 		// The server's own stations, under Favourites, once it says it has
@@ -55,7 +59,7 @@ func (a *app) radioHome() *view {
 				return
 			}
 			row := ui.Item{Label: "Your server", Icon: "server", Chevron: true, Sub: plural(len(st), "station"), Value: func() {
-				a.push(a.stationList("Your server", "No stations on your server.", a.sub.InternetRadioStations))
+				a.push(a.stationList("Your server", "No stations on your server.", true, a.sub.InternetRadioStations))
 			}}
 			a.done <- func() {
 				v.list.Items = append(v.list.Items[:1], append([]ui.Item{row}, v.list.Items[1:]...)...)
@@ -72,7 +76,7 @@ func (a *app) radioHome() *view {
 // radioDir.stations).
 func (a *app) stationsBy(title string, q url.Values) *view {
 	hide := !a.cfg.RadioBroken
-	return a.stationList(title, "No stations here.", func() ([]Station, error) {
+	return a.stationList(title, "No stations here.", true, func() ([]Station, error) {
 		return a.radio.stations(q, hide, a.sub.fresh.Load() > 0)
 	})
 }
@@ -80,8 +84,9 @@ func (a *app) stationsBy(title string, q url.Values) *view {
 // stationList lists stations, filtered and sorted by Radio › Options. A
 // plays a station, with the list as the queue, so L1 and R1 on Now Playing
 // go to the stations next to it; X stars or unstars one. empty is shown for
-// a list with no stations.
-func (a *app) stationList(title, empty string, fetch func() ([]Station, error)) *view {
+// a list with no stations; filter applies the options' filters, not only
+// the order.
+func (a *app) stationList(title, empty string, filter bool, fetch func() ([]Station, error)) *view {
 	opts := *a.cfg
 	v := &view{title: title, hints: []ui.Hint{{Button: "A", Label: "Play"}, {Button: "X", Label: "Star"}}}
 	var stations []Station // as listed
@@ -118,7 +123,9 @@ func (a *app) stationList(title, empty string, fetch func() ([]Station, error)) 
 	return a.load(v, func() ([]ui.Item, func(), error) {
 		st, err := fetch()
 		found := len(st)
-		st = filterStations(st, opts)
+		if filter {
+			st = filterStations(st, opts)
+		}
 		sortStations(st, opts.radioSort())
 		songs := make([]Song, len(st))
 		items := make([]ui.Item, len(st))
@@ -188,6 +195,7 @@ func (a *app) radioOptions() {
 
 // radioOptionItems are the rows of Radio › Options.
 func radioOptionItems(cfg Settings) []ui.Item {
+	// the filters leave the favourites alone
 	broken := ui.Item{Label: "Broken stations", Icon: "cross", Detail: "Hidden", Sub: "Ones that failed their last check"}
 	if cfg.RadioBroken {
 		broken.Detail = "Shown"

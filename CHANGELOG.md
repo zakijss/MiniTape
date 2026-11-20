@@ -12,9 +12,9 @@ All notable changes are listed here. The format follows
 
 - Radio, on the first screen, with or without a server: stations from radio-browser.info by popularity, trending, genre, country and language, a search by name, and the server's own internet radio stations (Subsonic `getInternetRadioStations`) when it has some. Only stations in formats the device plays are listed, 100 to a list.
 - Favourites: X in a list of stations, or R2 on Now Playing, stars a station. They are kept in `App/MiniTape/radio-favourites.json`.
-- Radio > Options: sort by popularity, trending, name or bit rate, show or hide stations that failed the directory's last check, MP3 and AAC only, and a lowest bit rate (64 or 128 kbit/s). They apply to every list of stations.
+- Radio > Options: sort by the list's own order (the default), popularity, trending, name or bit rate, for every list of stations; and, for every list but Favourites, show or hide stations that failed the directory's last check, MP3 and AAC only, and a lowest bit rate (64 or 128 kbit/s).
 - Now Playing on a station shows LIVE, the time listened, the format and bit rate, and the song the station sends as its title (ICY metadata). L1 and R1 go to the previous and next station in the list.
-- Stations play through the relay like songs, so HTTPS streams, background playback and the pause for games work. Old SHOUTcast servers that answer "ICY 200 OK" work too. A stream that drops is connected again, up to five times in a row; A stops a station and tunes in again live instead of holding it paused.
+- Stations play through the relay like songs, so HTTPS streams, background playback and the pause for games work. Old SHOUTcast servers that answer "ICY 200 OK" work too. A stream that drops is connected again, up to five times in a row. A stops a station and tunes in again live instead of holding it paused, and its hint says Stop or Tune in.
 - Lists of stations are kept on the card (stations for 6 hours, genres, countries and languages for a week) and shown from there when the directory can't be reached.
 - The last station is kept for the next start, like a song. Stations aren't scrobbled; starting one counts a listen with the directory, as it asks players to.
 

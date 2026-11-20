@@ -40,7 +40,7 @@ In the lists, **Y** refreshes from the server (lists open at once from the copy 
 
 On the now-playing screen a station shows LIVE, its format and bit rate, and the song it is playing when it sends the title. **L1**/**R1** go to the previous or next station in the list it was started from, **R2** stars it, and **A** stops it; pressed again it tunes in live. A stream that drops is connected again, and the last station is there on the next start, like a song.
 
-**Radio > Options** sorts every list of stations by popularity, trending, name or bit rate, shows or hides the stations that failed the directory's last check, keeps only MP3 and AAC streams, and leaves out stations below 64 or 128 kbit/s. Starting a station counts a listen with the directory, which asks players to do this; stations are never sent to Last.fm, ListenBrainz or the server.
+**Radio > Options** sorts every list of stations in the list's own order (the default: by votes in Popular, by recent listens in Trending), by popularity, trending, name or bit rate. It also shows or hides the stations that failed the directory's last check, keeps only MP3 and AAC streams, and leaves out stations below 64 or 128 kbit/s; these never hide a station in Favourites. Starting a station counts a listen with the directory, which asks players to do this; stations are never sent to Last.fm, ListenBrainz or the server.
 
 ### Music on the card
 

@@ -219,7 +219,7 @@ func TestScreens(t *testing.T) {
 	a.draw()
 
 	open("minitape-radio-stations")
-	v := a.stationList("Popular", "", func() ([]Station, error) { return stations, nil })
+	v := a.stationList("Popular", "", true, func() ([]Station, error) { return stations, nil })
 	a.stack = []*view{{title: "MiniTape"}, a.radioHome(), v}
 	a.waitLoaded(t, v)
 
@@ -228,5 +228,5 @@ func TestScreens(t *testing.T) {
 	a.draw()
 
 	open("minitape-radio-options")
-	drawMenu(a.scr, "Radio options", &ui.List{Items: radioOptionItems(Settings{RadioSort: "name", RadioMinKbps: 64})})
+	drawMenu(a.scr, "Radio options", &ui.List{Items: radioOptionItems(Settings{RadioMinKbps: 64})})
 }

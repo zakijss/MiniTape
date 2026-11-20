@@ -138,8 +138,10 @@ func codecText(s Song) string {
 // ---- options (Radio › Options, kept in settings.json) ----
 
 // radioSorts are the orders of Radio › Options › Sort by.
+// "list" keeps the list's own order: the directory's ranking (votes, or
+// the click trend for Trending), the server's, or the order starred.
 var radioSorts = []struct{ key, label string }{
-	{"votes", "Popularity"}, {"trend", "Trending"}, {"name", "Name"}, {"bitrate", "Bit rate"},
+	{"list", "List order"}, {"votes", "Popularity"}, {"trend", "Trending"}, {"name", "Name"}, {"bitrate", "Bit rate"},
 }
 
 // radioMinRates are the choices of the lowest bit rate, in kbit/s (0: any).
@@ -159,7 +161,7 @@ func (s Settings) radioSort() string {
 			return o.key
 		}
 	}
-	return "votes"
+	return "list"
 }
 
 // filterStations keeps the stations the options let through, in place:
@@ -181,8 +183,8 @@ func filterStations(st []Station, cfg Settings) []Station {
 	})
 }
 
-// sortStations puts stations in the order by (see radioSorts). Ties keep
-// the directory's order.
+// sortStations puts stations in the order by (see radioSorts). Ties, and
+// the whole list for "list", keep the order they came in.
 func sortStations(st []Station, by string) {
 	slices.SortStableFunc(st, func(a, b Station) int {
 		switch by {
@@ -192,8 +194,10 @@ func sortStations(st []Station, by string) {
 			return cmp.Compare(strings.ToLower(strings.TrimSpace(a.Name)), strings.ToLower(strings.TrimSpace(b.Name)))
 		case "bitrate":
 			return cmp.Compare(b.Bitrate, a.Bitrate)
+		case "votes":
+			return cmp.Compare(b.Votes, a.Votes)
 		}
-		return cmp.Compare(b.Votes, a.Votes)
+		return 0
 	})
 }
 

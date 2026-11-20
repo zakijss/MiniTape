@@ -60,10 +60,11 @@ type Settings struct {
 	// LocalOnly: the first start was told to play only the card's music,
 	// so it doesn't ask for a server again.
 	LocalOnly bool `json:"local_only,omitempty"`
-	// Radio › Options, for every list of stations: the order ("votes", the
-	// default, "trend", "name" or "bitrate"), whether stations that failed
-	// the directory's last check show, only MP3 and AAC streams, and the
-	// lowest bit rate in kbit/s (0: any).
+	// Radio › Options: the order of every list of stations ("list", the
+	// default, "votes", "trend", "name" or "bitrate"), and for every list
+	// but the favourites, whether stations that failed the directory's
+	// last check show, only MP3 and AAC streams, and the lowest bit rate in
+	// kbit/s (0: any).
 	RadioSort    string `json:"radio_sort,omitempty"`
 	RadioBroken  bool   `json:"radio_show_broken,omitempty"`
 	RadioMP3AAC  bool   `json:"radio_mp3_aac_only,omitempty"`
@@ -1677,7 +1678,14 @@ func (a *app) drawNowPlaying() {
 	}
 	hints := []ui.Hint{{Button: "A", Label: play}, {Button: "L1/R1", Label: "Skip"}, {Button: "Y", Label: "Lyrics"}, {Button: "X", Label: "Stop"}, {Button: "B", Label: "Browse"}}
 	if radio {
-		hints = slices.Delete(hints, 2, 3)
+		// A stops a station (it isn't held paused) and tunes in again, so
+		// it says so, and X (stop and empty the queue) needs no hint of
+		// its own; nor do the lyrics.
+		hints[0].Label = "Stop"
+		if st.Paused || !st.Playing {
+			hints[0].Label = "Tune in"
+		}
+		hints = slices.Delete(hints, 2, 4)
 	}
 	s.Footer(hints...)
 }

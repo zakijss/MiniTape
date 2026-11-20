@@ -81,14 +81,15 @@ func TestFilterAndSortStations(t *testing.T) {
 		cfg  Settings
 		want string
 	}{
-		{Settings{}, "Coast AAC,Night FM,alpha Ogg"},
-		{Settings{RadioBroken: true}, "Coast AAC,Broken,Night FM,alpha Ogg"},
-		{Settings{RadioMP3AAC: true}, "Coast AAC,Night FM"},
+		{Settings{}, "Night FM,Coast AAC,alpha Ogg"}, // as listed
+		{Settings{RadioBroken: true}, "Night FM,Coast AAC,Broken,alpha Ogg"},
+		{Settings{RadioMP3AAC: true}, "Night FM,Coast AAC"},
+		{Settings{RadioSort: "votes"}, "Coast AAC,Night FM,alpha Ogg"},
 		{Settings{RadioMinKbps: 64}, "Night FM,alpha Ogg"},
 		{Settings{RadioSort: "trend"}, "alpha Ogg,Coast AAC,Night FM"},
 		{Settings{RadioSort: "name"}, "alpha Ogg,Coast AAC,Night FM"},
 		{Settings{RadioSort: "bitrate"}, "alpha Ogg,Night FM,Coast AAC"},
-		{Settings{RadioSort: "nonsense"}, "Coast AAC,Night FM,alpha Ogg"},
+		{Settings{RadioSort: "nonsense"}, "Night FM,Coast AAC,alpha Ogg"},
 	} {
 		st := filterStations(testStations(t), c.cfg)
 		sortStations(st, c.cfg.radioSort())
@@ -104,10 +105,33 @@ func TestFilterAndSortStations(t *testing.T) {
 	}
 }
 
+// The options never hide a starred station; other lists are filtered.
+func TestFavouritesUnfiltered(t *testing.T) {
+	a := testApp(t, "")
+	a.cfg = &Settings{RadioMP3AAC: true, RadioMinKbps: 128, RadioSort: "name"}
+	all := func() ([]Station, error) { return testStations(t), nil }
+	fav := a.stationList("Favourites", "", false, all)
+	a.push(fav)
+	a.waitLoaded(t, fav)
+	other := a.stationList("Popular", "", true, all)
+	a.push(other)
+	a.waitLoaded(t, other)
+	var got []string
+	for _, it := range fav.list.Items {
+		got = append(got, it.Label)
+	}
+	if strings.Join(got, ",") != "alpha Ogg,Broken,Coast AAC,Night FM,No address,Video" || len(other.list.Items) != 1 {
+		t.Fatalf("favourites %q, other list %d stations", got, len(other.list.Items))
+	}
+}
+
 // Left and right step through the options, A too.
 func TestStepRadio(t *testing.T) {
 	var cfg Settings
-	for _, want := range []string{"trend", "name", "bitrate", "votes"} {
+	if cfg.radioSort() != "list" {
+		t.Fatalf("default sort %q", cfg.radioSort())
+	}
+	for _, want := range []string{"votes", "trend", "name", "bitrate", "list"} {
 		stepRadio(&cfg, "Sort by", 1)
 		if cfg.radioSort() != want {
 			t.Fatalf("sort %q, want %q", cfg.RadioSort, want)
